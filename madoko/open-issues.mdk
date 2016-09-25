@@ -1,0 +1,106 @@
+<!--% !Tex root = checkedc.tex-->
+
+# Pending work and open issues {  #chapter-open-issues }
+
+
+This chapter discusses work that needs to be done and open issues.
+
+# Pending work 
+
+
+This section describes work that should be done soon because it is
+needed for completeness or to simplify writing code:
+
+
+* Function pointers: the \keyword{where} clauses must become part of the signature
+  of the function.  In addition, we need to define the 
+  rules for conversion of function pointers.
+
+* The definition of \spanptrT needs to be extended to include
+   relative alignment.
+
+* For structures, add wording that allows a single statement  
+to update a variable member whose member bounds is expected to hold after
+the statement.  Also add wording to allow a bundle block to do this.
+
+# Language and library features to be addressed 
+
+
+
+
+* Decide what to do about null terminated arrays. Do we have special rules
+  for them?
+
+* Old-style function declarations where argument list length or
+  parameter/argument types could be mismatched at compile time, leading
+  to undefined behavior.
+
+* Variable arguments
+
+* Pointer casts that produce incorrectly aligned pointers have undefined
+  behavior, according to the C11 standard. This hole should be filled in
+  for checked pointer types. For checked pointer types, we should specify
+  either (1) dereferencing an incorrectly aligned pointer shall cause a
+  runtime error or (2) the cast itself shall check any alignment
+  requirements. For case 1, note that pointer arithmetic for checked pointer types
+  is already
+  defined to preserve misalignment.
+
+# Concrete syntax 
+
+ 
+The current syntax for describing post-conditions places a \keyword{where}
+clause after the function parameter list declaration:
+
+```
+f( ...)
+where cond1 ... 
+```
+This syntax might lead to confusion. We might want to adopt an alternate
+syntax that makes this clearer. Some suggestions are the keywords
+[on&underscore;return]{font-family:monospace} or [after]{font-family:monospace}:
+
+```
+f(...)
+on_return cond1 ...
+
+f(...)
+after cond1 ... 
+```
+Section [#section-alternate-pointer-type-syntax] describes alternate
+syntax proposals for pointer types.
+
+# Further out work 
+
+
+
+* Allow conditional bounds expressions.   While conditional
+expressions are allowed in the non-modifying expressions in a bounds expression, 
+there is not a conditional form of bounds expressions.  This is useful for
+specifying that an expression only has bounds if some condition is true.
+This could be provided by adding a clause to bounds-exp that uses the
+same syntax as C conditional expressions:
+
+~ Begin Tabbing 
+\var{bounds}=\var{-exp:} &br;
+>[{\var{non-modifying-exp} ? \var{bounds-exp} : \var{bounds-exp}}]{font-family:monospace}
+
+~ End Tabbing
+We would need to add descriptions of introduction and elimination
+forms, as well as enhance the rules for checking the validity of bounds.
+
+* Allow bounds declarations to declare bounds for expressions.
+This would allow the system to easily support tagged null pointers.
+The bounds for the untagged pointer would be described. 
+A tagged pointer could not be used to access memory.  It would have to be
+untagged first  to have valid bounds.
+
+* Consider whether to allow functions to be
+parametric with respect to the state of member bounds. This might be
+useful to describe a function that sets one of the members of a
+structure type and does not affect the state of other members.
+
+* We could allow signed integer expressions to be invertible
+by trying to prove that the expressions are in range, using the
+checking of facts in \keyword{where} clauses.
+

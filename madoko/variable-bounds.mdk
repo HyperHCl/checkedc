@@ -1,0 +1,1619 @@
+<!--% !Tex root = checkedc.tex-->
+
+# Bounds for variables {  #chapter-tracking-bounds }
+
+
+Variable with \arrayptr types that are used to access
+memory must have bounds declared for them.  The same requirement
+holds for variables with incomplete checked array types.
+
+For an \arrayptr variable, the bounds will be used to check
+memory accesses at runtime involving the pointers stored in the variable
+or pointers produced by pointer arithmetic that uses those pointers.
+Runtime checks can be omitted if a compiler proves that they are
+redundant. In addition, for performance-critical code, checks will be
+omitted when programmers demonstrate at compile-time that the checks are
+redundant (see Section [#section-avoiding-bounds-checks] for details).
+
+# Bounds declarations {  #section-bounds-declarations }
+
+
+Bounds are declared using bounds declarations. Bounds declarations have
+the form:
+
+
+~ Begin Tabbing 
+\var{bounds}=-\var{decl:} &br;
+> \boundsdecl{\var{x}}{\var{bounds-exp}} &br;
+&br;
+\var{bounds}\var{-exp:} &br;
+> [count(]{font-family:monospace}\var{non-modifying-exp}[)]{font-family:monospace} &br;
+> \bounds{\var{non-modifying-exp}}{\var{non-modifying-exp}} &br;
+> \boundsnone &br;
+> \boundsany
+
+~ End Tabbing
+where \var{x} is a variable. There are additional forms for handling
+casts and void pointers that are described in 
+Sections [#section-pointer-cast-results] and [#section-pointers-to-void].
+
+A bounds expression describes the memory that can be accessed using the
+value of \var{x}, provided that x is not null. Bounds expressions
+include counts, pairs that specify an upper bound and lower bound,
+\boundsnone, and \boundsany:
+
+
+
+* \boundsdecl{\var{x}}{\boundscount{e1}} describes the number of
+  elements that are accessible beginning at \var{x}. Only memory that
+  is at or above x and below \var{x} [+]{font-family:monospace} \var{e1} can be
+  accessed through \var{x}, where \var{x} [+]{font-family:monospace} \var{e1} is
+  interpreted using \arrayptr pointer arithmetic.
+
+* \boundsdecl{\var{x}}{\bounds{\var{e1}}{\var{e2}}}
+  describes the range of memory that can be accessed through \var{x}.
+  Only memory that is at or above the location specified by \var{e1}
+  and below \var{e2} can be accessed through \var{x}.
+
+* \boundsdecl{\var{x}}{\boundsnone} declares that \var{x} has no bounds.
+  It is an error at compile-time to attempt to access memory using a
+  variable of type \arrayptr with no bounds.
+
+* \boundsdecl{\var{x}}{\boundsany} is a special form that readers can
+  ignore for now. It is used for null pointers (0 cast to a pointer
+  type) and means that \var{x} can have any bounds. Because null
+  pointers cannot be used to access memory, they can have any bounds.
+
+Bounds expression use "non-modifying" expressions. These are a subset
+of C expressions that do not modify variables or memory. They include
+local variables, parameters, constant expressions, casts, and operators
+such as addition, subtraction, and address-of. 
+Section [#section-non-modifying-expressions]  describes
+non-modifying expressions in detail.
+
+In a bounds declaration of the form \boundsdecl{\var{x}}{\var{bounds-exp}},
+\var{x} can have an \arrayptr or a checked array type.
+For the form  \boundsdecl{\var{x}}{\boundscount{\var{e1}}},  the type of
+\var{x} cannot be \arrayptrvoid and the type of \var{e1} must be an integral type.
+The usual C integer conversions are applied to \var{e1}.[^fn-1bf]
+For \boundsdecl{\var{x}}{\bounds{\var{e1}}{\var{e2}}}, \var{e1} and
+\var{e2} must be pointers to the same type.  Typically \var{x} is also 
+a pointer to that type or an array of that type.  
+However, \var{x} can be a pointer to or an array of a different type.
+This is useful for describing the results of casts and
+bounds for \arrayptrvoid pointers.
+
+[^fn-1bf]: 
+    If the
+    type of \var{e1} is a character, a short integer, a bit field, or an enumeration type,
+    the expression is promoted to an \keyword{int} type if that is large
+    enough to  hold all values of the type or an \keyword{unsigned int} type otherwise.
+
+For any variable with a bounds declaration, the variable must be
+non-null when memory is accessed There is no requirement that an
+\arrayptr variable stay within its bounds. The requirement is
+that the \arrayptr variable can only be dereferenced if it is
+in bounds. This avoids bound checks on pointer arithmetic.
+
+Count expressions have limits on their ranges to prevent signed integer
+overflow and unsigned integer wraparound from affecting size
+computations. Section [#section-integer-overflow-informal]
+explains these limits in detail. The limits
+depend on the element type of the \arrayptr and the type of the count
+expression. For \boundsdecl{\var{x}}{\boundscount{\var{e1}}}, where \var{x}
+has type \arrayptrT ,
+\var{e1} must be greater than or equal to 0. \var{e1} must be less
+than the maximum number of an
+\arrayptrT elements
+that can be indexed by an integer whose type matches that of \var{e1}.
+A bounds declaration \boundsdecl{\var{x}}{\boundscount{\var{e1}}} is an
+abbreviation for \boundsdecl{\var{x}}{\bounds{\var{x}}{\var{x} [+]{font-family:monospace} \var{e1}}} with additional conditions that \var{e1}
+[{>= 0 &amp;&amp; \var{e1} <= (char \*)}]{font-family:monospace}
+\var{ub}[.]{font-family:monospace} \var{ub} is either
+[{UINTPTR&underscore;MAX/\sizeof{\var{T}}}]{font-family:monospace} or
+[{INTPTR&underscore;MAX/\sizeof{\var{T}}}]{font-family:monospace}. 
+
+The conditions may require programmers to add additional checks at memory allocations
+to show that \var{e1} is in range. However, the conditions have advantages too.
+They provide scaffolding for proving that expressions based on
+element counts of \arrayptr variables do not overflow or wraparound.
+
+The meaning and correctness of bounds are based on the C semantics for
+pointers and pointer arithmetic. At runtime, any non-null pointer in C
+has an object associated with it. The association starts when a pointer
+is created by a memory allocation operation, address-of expression, or
+conversion of an array variable to a pointer-typed expression. It flows
+through to pointers that result from pointer arithmetic. At runtime, the
+bounds for a pointer must be the bounds of the object associated with
+the pointer or a subrange of those bounds. The correctness of declared
+bounds information at compile-time is ensured by making allocation sites
+and address-of expressions be creators of bounds information and by
+propagating bounds with the pointers with which they are associated.
+Bounds can be narrowed during propagation, but they cannot be widened.
+
+The meaning of a bounds expression can be defined more precisely. At
+runtime, given an expression \var{e} with a bounds expression
+\bounds{\var{lb}}{\var{ub}}, let the runtime
+values of \var{e}, \var{lb}, and \var{ub} be \var{ev}, \var{lbv},
+and \var{ubv}, respectively. The value \var{ev} will be [0]{font-family:monospace} (null) or
+have been derived via a sequence of operations from a pointer to some
+object \var{obj} with \bounds{\var{low}}{\var{high}}.
+The following statement will be true at runtime:
+\var{ev} [{== 0 || (\var{low} <= \var{lbv}&amp;&amp; 
+\var{ubv} <= \var{high})}]{font-family:monospace}. In other words, 
+if \var{ev} is null, the bounds
+may or may not be valid. If \var{ev} is non-null, the bounds must be
+valid. This implies that any access to memory where \var{ev} [!=
+0 &amp;&amp;]{font-family:monospace} \var{lbv} [<=]{font-family:monospace} \var{ev} [&amp;&amp;]{font-family:monospace} \var{ev}
+[<]{font-family:monospace} \var{ubv} will be within the bounds of \var{obj}.
+
+In this section, to simplify the description, it is assumed that none of
+the \arrayptr variables that have bounds declarations have
+their addresses taken. It is also assumed that the values of variables
+whose addresses are taken are not used in bounds declarations. It is
+acceptable to use the address of an address-taken variable in a bounds
+declaration. This is provided that the resulting address is not used to
+access memory in the bounds declaration (that is, indirectly access the
+value of a variable). For example, given the declaration [int x]{font-family:monospace},
+the expression [&amp;x]{font-family:monospace} may appear in a bounds expression.  
+Chapter [#chapter-pointers-to-data-with-arrayptrs] extends the
+design to avoid these restrictions.  It covers pointers to data with 
+\arrayptr values,  pointers to variables used in bounds, and bounds 
+that use pointers.
+
+## Using bounds declarations 
+
+
+Bounds declarations may be added to declarations and statements using
+\keyword{where} clauses. They also may be placed inline at a declaration
+by following the declarator with [:]{font-family:monospace} \var{bounds-exp}. In that
+case, the bounds expression applies to the variable that is the subject
+of the declarator. By making the bounds be part of the program, this
+preserves the control and efficiency of C. The bounds declarations will
+be checked statically for correctness using rules described in 
+Chapter [#chapter-checking-bounds].
+
+## Bounds declarations at variable declarations {  #section-variable-declarations }
+
+
+Here are some examples of bounds declarations as part of variable
+declarations. The first function sums the integers stored in memory
+between [start]{font-family:monospace} and [end]{font-family:monospace}, where the integer stored at
+[end]{font-family:monospace} is not included.
+
+```
+int sum(array_ptr<int> start : bounds(start, end), array_ptr<int> end)
+{ 
+    int result = 0;
+    array_ptr<int> current : bounds(start, end) = start;
+    while (current < end) {
+       result += *current++; // *current is bounds-checked.  The checking ensures 
+                             // that current is within the bounds of (start, end) 
+                             // at the memory access.                           
+    }
+    return result;
+} 
+```
+This can be written using \keyword{where} clauses as well, at the
+inconvenience of typing variable names twice in declarations:
+
+```
+int sum(array_ptr<int> start where start : bounds(start, end), array_ptr<int> end)
+{ 
+    int result = 0;
+    array_ptr<int> current where current : bounds(start, end) = start;
+    while (current < end) {
+       result += *current++;                          
+    }
+    return result;
+} 
+```
+This function searches for an integer in an array. If it finds the
+integer, it returns the index in the array where the integer occurs.
+Otherwise, it returns -1.
+
+```
+int find(int key, array_ptr<int> a : count(len), int len)
+{
+    for (int i = 0; i < len; i++) {
+         if (a[i] == key) { // a[i] is bounds checked.  The checking
+                            // ensures that i is between 0 and len.
+             return i;
+         }
+    }
+    return -1;
+} 
+```
+If the code was written assuming that it would always find the integer,
+bounds-checking would detect the buffer overrun in the case the integer
+was not present:
+
+```
+int bad_find(int key, array_ptr<int> a : count(len), int len)
+{
+    int i = 0;
+    while (1) {
+        if (a[i] == key) { // The bounds check will fail when i == len
+            return i;
+        }
+        i++;
+    }
+    return -1;
+}
+ 
+```
+This function adds two arrays of 2x2 arrays.
+
+```
+int add(int a checked[][2][2] : count(len), int b checked[][2][2] : count(len), 
+        int len) 
+{
+    for (int i = 0; i < len; i++) {
+        // All array accesses are bounds checked
+        a[i][0][0] += b[i][0][0]; 
+        a[i][0][1] += b[i][0][1];
+        a[i][1][0] += b[i][1][0];
+        a[i][1][1] += b[i][1][1];
+    }
+} 
+```
+Externally-scoped variables can have bounds as well:
+
+```
+// external-scoped variables that hold a buffer and its length
+int buflen = 0;
+array_ptr<int> buf : count(buflen) = NULL;
+
+int sum()
+{
+    int result = 0;
+    for (int i = 0; i < buflen; i++) {
+        result += buf[i]; // bounds checked
+    }
+    return result;
+} 
+```
+This is a declaration of a function that copies bytes provided that the
+pointers and lengths are aligned:
+```
+int aligned_memcpy(array<char> dest where dest : count(len) && aligned(dest, 4),
+                   array<char> src where src : count(len) && aligned(src, 4),
+                   int len where len % 4 == 0); 
+```
+The declaration can be shortened using in-line bounds declarations to:
+
+```
+int aligned_memcpy(array<char> dest : count(len) where aligned(dest, 4),
+                   array<char> src : count(len) where aligned(src, 4),
+                   int len where len % 4 == 0); 
+```
+This example is adapted from the OpenSSL library. The signature of a
+method has been modified to have bounds declaration. The size of input
+and output buffers must be multiples of 16 because the function operates
+on 16-byte chunks of data.
+
+```
+void AES_cbc_encrypt(array_ptr<const unsigned char> in : count(len),
+                     array_ptr<unsigned char> out : count(len),
+                     size_t len where len % 16 == 0,
+                     ptr<const AES_KEY> key,
+                     array_ptr<unsigned char> ivec : count(16),
+                     const int enc); 
+```
+## Bounds declarations at expression statements {  #section-statement-declarations }
+
+
+Programmers may wish to delay initializing variables or may wish to
+change the bounds of a variable in the middle of a function. This can be
+done using bounds declarations attached to expression statements. In C,
+an expression is converted to a statement by placing a semi-colon after
+the expression. This creates an expression statement. A \keyword{where}
+clause may be added before the terminating semi-colon of an expression
+statement.
+
+Any variable that has bounds declared at an expression statement has
+dataflow-sensitive bounds throughout the body of the function. Only
+automatic variables can have bounds declared for them at expression
+statements. It does not make sense to have dataflow-sensitive bounds for
+externally-scoped variables and variables with static or thread storage.
+The bounds extend to the next assignment to any variable in the bounds
+declaration, with some exceptions for pointer incrementing or
+decrementing. Section [#section-extent-of-declarations] 
+describes the extent of flow-sensitive bounds
+in more detail.
+
+Here is a simple example that illustrates bounds declarations at
+statements. The variable [tmp]{font-family:monospace} first points to an array with 5
+elements and then points to an array with 10 elements; the bounds are
+adjusted accordingly.
+
+```
+void f() 
+{
+   int x[5];
+   int y[10];
+   array_ptr<int> tmp;
+   tmp = x where tmp : count(5);
+   ...
+   tmp = y where tmp : count(10);
+} 
+```
+In the second example, an \arrayptr [c]{font-family:monospace} and its length are initialized
+lazily to either [a]{font-family:monospace} or [b]{font-family:monospace}, depending on another parameter [val]{font-family:monospace}:
+
+```
+/* use either a or b depending on val */
+int choose(int val, array_ptr<int> a : count(alen), int alen,
+                    array_ptr<int> b : count(blen), int blen) 
+{
+    array_ptr<int> c;
+    int clen;
+    if (val) {
+        clen = alen;
+        c = a where c : count(clen);
+    }
+    else {
+        clen = blen;
+        c = b where c : count(clen);
+    }    
+    ...
+} 
+```
+Declaring bounds at assignments supports updating of variables that are
+used in the bounds for an existing \arrayptr variable. New
+bounds for the \arrayptr variable can be declared to reflect
+the update. Consider the following example:
+
+```
+/* sum integers stored between start and end, where end is not included */
+int sum(array_ptr<int> start : bounds(start, end), array_ptr<int> end)
+{ 
+    ...
+    // Adjusting end. Can declare new bounds for start at the assignment
+    end = end - 1 where start : bounds(start, end + 1);
+} 
+```
+### Bounds declarations for return values 
+
+
+Bounds may be declared for the value returned by a function. The
+parameter list can be followed by either [:]{font-family:monospace} \var{bounds-exp} or
+a \keyword{where} clause. The special variable \keyword{return&underscore;value} can
+be used to refer to the return value. The parameters are considered in
+scope for the bounds declaration or \keyword{where} clause. Any parameters
+occurring in the return bounds declaration or \keyword{where} clause may
+not be modified by the body of the function.
+
+The following example show the [find]{font-family:monospace} function from
+Section [#section-variable-declarations] modified
+to return a pointer to the element instead of the index:
+
+```
+array_ptr<int> find(int key, array_ptr<int> a : count(len), int len)
+ : bounds(a, a + len)
+{
+    for (int i = 0; i < len; i++) {
+         if (a[i] == key) { // a[i] is bounds checked.  The checking
+                            // ensures that i is between 0 and len.
+             return &a[i];
+         }
+    }
+    return NULL;
+} 
+```
+This also can be written as:
+
+```
+array_ptr<int> find(int key, array_ptr<int> a : count(len), int len)
+  where return_value : bounds(a, a + len)
+{
+   ...
+} 
+```
+Here is the declaration of a function that allocates memory:
+
+```
+array_ptr<char> alloc(size_t size) : count(size); 
+```
+## Invariant bounds declarations {  #section-invariant-bounds-declarations }
+
+
+Variables that only have bounds declared for them at their definition
+have bounds that are invariants. Any assignments to the variable
+_or_\/ variables in the bounds expression must maintain the
+invariant. The invariant can be suspended temporarily during updates.
+
+Because externally-scoped \arrayptr variables can have bounds declared
+for them only at their definitions, by definition their bounds are
+always invariants.
+
+## Lexical hiding of variables 
+
+
+A nested lexical scope is not allowed to hide a variable used in a
+bounds declaration within the extent of the bounds declaration. This
+prevents programs from accidentally invalidating the bounds declaration:
+
+```
+/* illegal function */
+void bad(int i) 
+{
+    array_ptr<int> x : count(i) = malloc ((sizeof(int) * i);
+    {
+        int x = 5;     // hide x
+        i = INT_MAX;   // subvert bounds
+    }
+    x[random()] = 0xbad;
+} 
+```
+## Storage class-related requirements 
+
+
+Local variables with static storage class or thread storage class can
+have only bounds declarations with bounds expressions that use variables
+with the same storage class as the local variable or variables that are declared
+[const]{font-family:monospace}. The memory for static variables and thread variables
+persists across exit and reentry from functions and blocks. It follows
+that the bounds information must persist also.
+
+Local variables with automatic storage class can have bounds
+declarations with bounds expressions that use variables with automatic,
+static, or thread storage class. However, the extent of local variable
+bounds declarations that use variables with external linkage ends at
+function calls, unless the variables with external linkage are declared
+[const]{font-family:monospace}. This is because the function calls may modify the
+variables with external linkage.
+
+# Variables at external scope {  #section-external-scope-variables }
+
+
+If there are multiple declarations of a variable with external scope in
+a translation unit, the bounds declaration and/or \keyword{where} clauses for the
+variable must be identical at all the declarations. This prevents the
+specification of different bounds for global variables in the same
+compilation unit. Any variables with external scope that have bounds
+declarations and/or \keyword{where} clauses must have the same bounds declaration
+and where clauses in all translation units.
+
+All places in a program that may write to a variable with external scope
+also must have the same view of the bounds declarations involving that
+variable. This allows static checking to ensure that bounds declarations
+remain valid.
+
+To see what can go wrong without this requirement, consider the
+following example:
+
+```
+extern int size;
+
+void update_size(int i)
+{
+    num = i;
+}
+
+extern array_ptr<int> ap : count(size);
+
+void go()
+{
+    update_size(INT_MAX);
+    ap[100] = 0xbad;
+}
+
+// define size and ap
+int size = 10;
+int arr[10];
+array_ptr<int> ap = arr : count(size); 
+```
+The checking of bounds declarations does not know at
+[update&underscore;size]{font-family:monospace} that [ap]{font-family:monospace} needs to have at least [i]{font-family:monospace}
+elements when [size]{font-family:monospace} is updated, allowing a programmer to accidentally
+invalidate bounds declarations.
+
+A simple rule enforces this restriction. Given the initial declaration
+in a translation unit of a variable with external scope that has a
+\keyword{where} clause, there cannot be any function definitions between
+the declaration and the initial declarations of other variables used in
+the bounds declaration for the variable or the optional \keyword{where} clause for the declaration.
+It is possible for the initial declaration of
+a variable with external scope to occur within the body of a function.
+In that case, there cannot be any statements or declarations of
+non-external variables with initializers between the initial declaration
+and the initial declarations of other variables used in the
+bounds declaration for the variable or the optional \keyword{where} clause for
+the declaration.
+
+# Syntax changes 
+
+The grammar from the "C Programming Language" [@Ritchie1988] is extended to include
+in-line bounds declarations and \keyword{where} clauses for declarations:
+
+
+~ Begin Tabbing 
+\var{init-}=\var{declarator:} &br;
+>\var{declarator inline-bounds-specifier\textsubscript{opt} where-clause\textsubscript{opt}} &br;
+>\var{declarator inline-bounds-specifier\textsubscript{opt} 
+where-clause\textsubscript{opt}} [=]{font-family:monospace} \var{initializer
+where-clause\textsubscript{opt}} &br;
+>\ldots &br;
+&br;
+\var{parameter-declaration:} &br;
+>\var{declaration-specifiers declarator} \var{inline-bounds-specifier\textsubscript{opt} where-clause\textsubscript{opt}} &br;
+&br;
+\var{inline-bounds-specifier:}&br;
+>[:]{font-family:monospace} \var{bounds-exp} &br; 
+&br;
+\var{where-clause}: &br;
+>\keyword{where} \var{facts} &br;
+&br;
+\var{facts:} &br;
+>\var{fact} &br;
+>\var{fact} [&amp;&amp;]{font-family:monospace} \var{facts} &br;
+&br;
+\var{fact:}&br;
+>\var{variable inline-bounds-specifier} &br;
+>\var{variable relop non-modifying-exp} &br;
+>\var{non-modifying-exp relop variable} &br;
+&br;
+where \var{relop} is one of `<`, `<=`, `==`,
+`!=`, `>=`, `>`.&br;
+&br;
+In addition, the grammar is updated to allow where clauses at expression
+statements:&br;
+&br;
+\var{expression-statement:}&br;
+>\var{expression\textsubscript{opt} where-clause\textsubscript{opt}}[;]{font-family:monospace}
+
+~ End Tabbing
+# Operations allowed in non-modifying expressions {  #section-non-modifying-expressions }
+
+
+As mentioned earlier, non-modifying expressions are a subset of C
+expressions that do not modify variables or memory. The subexpressions
+of a non-modifying expression must themselves be non-modifying
+expressions. Non-modifying expressions include the following kinds of
+expressions:
+
+
+~ Begin Compactitem 
+
+
+* Local variables and parameter variables
+
+* Constant expressions
+
+* Cast expressions
+
+* Address-of expressions
+
+* Unary plus/minus expressions
+
+* One's complement expressions
+
+* Logical negation expressions
+
+* Sizeof expressions
+
+* Multiplicative expressions ([\*]{font-family:monospace}, [/]{font-family:monospace}, [&perc;]{font-family:monospace})
+
+* Additive expressions ([+]{font-family:monospace}, [-]{font-family:monospace})
+
+* Shift expressions ([>>]{font-family:monospace}, [<<]{font-family:monospace})
+
+* Relational and equality expressions ([<]{font-family:monospace}, [>]{font-family:monospace},
+  [<=]{font-family:monospace}, [>=]{font-family:monospace}, [==]{font-family:monospace}, [!=]{font-family:monospace})
+
+* Bitwise expressions: and ([&amp;]{font-family:monospace}), or ([|]{font-family:monospace}), exclusive-or ([^]{font-family:monospace})
+
+* Logical AND ([&amp;&amp;]{font-family:monospace}) and logical OR ([||]{font-family:monospace}) expressions
+
+* Conditional expressions
+
+* Access to special members of \spanptr types
+  ([current]{font-family:monospace}, [lower&underscore;bound]{font-family:monospace}, and [upper&underscore;bound]{font-family:monospace})
+
+~ End Compactitem
+They also include expressions that access members of types or memory:
+
+
+~ Begin Compactitem 
+
+
+* Member references (to members of structures or unions) (the [.]{font-family:monospace}
+  operator)
+
+* Indirect member dereferences ([->]{font-family:monospace})
+
+* Pointer dereferences
+
+~ End Compactitem
+The static checking of the validity of bounds declarations restricts the
+usage of non-modifying expressions that read memory when memory is being
+modified.
+
+Non-modifying expressions do not include:
+
+
+~ Begin Compactitem 
+
+
+* Assignment expressions (for the reason that evaluating them repeatedly
+  at bounds checks would produce unexpected results)
+
+* Pre-increment/decrement and post-increment/decrement expressions
+  (these are forms of assignments)
+
+* Volatile variables
+
+* Function calls (because these may contain assignments that modify
+  variables or memory)
+
+* Comma expressions (because bounds expressions do not allow side
+  effects, these can always be simplified to the second expression)
+
+~ End Compactitem
+It is suggested that programmers use simple non-modifying expressions because
+the expressions may be fully re-evaluated at every bounds check involving the
+bounds expression. More complicated bounds expressions are allowed
+because programmers might find them useful.
+
+# Bounds declarations for results of casts between \arrayptr types {  #section-pointer-cast-results }
+
+
+Typically \arrayptr pointers and their bounds are relatively
+aligned. Together, they represent a view of an array of \var{T}, where
+the pointer has type
+\arrayptrT. The
+bounds specify a range of memory that is exactly the size of some array
+of T and the pointer points exactly at an element of that array. For
+example, suppose short ints are 2 bytes in size and 
+{[{\boundsdecl{x}{\bounds{y}{z}}}]{font-family:monospace}}, where the types of [x]{font-family:monospace},
+[y]{font-family:monospace}, [z]{font-family:monospace} are \arrayptrinst{[short int]{font-family:monospace}} .
+
+This illustration shows 12 consecutive bytes in memory beginning at
+address a\textsubscript{0}, where [y]{font-family:monospace} and [z]{font-family:monospace} bound a
+3-element array and [x]{font-family:monospace} points to the middle of the array. The
+memory occuped by the 3-element array is shaded in light blue, and the
+element pointed to by x is also cross-hatched. The distances in bytes
+between [x]{font-family:monospace}, [y]{font-family:monospace}, and [z]{font-family:monospace} are all multiples of 2,
+the size of [short int]{font-family:monospace}.
+
+~ Begin Center 
+\relalignpic{4}
+
+~ End Center
+This simplifies bounds checking because there is no concern during a
+bounds check that a pointer will access memory at the end or beginning
+of the array that partially overlaps with the bounds. Suppose, for
+example, that [x]{font-family:monospace} was not relatively aligned to [y]{font-family:monospace} and
+[z]{font-family:monospace} and points at a\textsubscript{7}. The object pointed to by
+[x]{font-family:monospace} now straddles the array bounds. This illustration shows this:
+
+~ Begin Center 
+\relalignpic{7}
+
+~ End Center
+When [x]{font-family:monospace} is not relatively aligned, the bounds check for x
+becomes more expensive. With relative alignment, the bounds check is
+[y <= x]{font-family:monospace} and [x < z]{font-family:monospace}. Without relative
+alignment, the check for the upper bound needs to compute the highest
+address that will be accessed using x. For this example, the highest
+address accessed will be
+[{(\arrayptrchar) x + \sizeof{short int} - 1}]{font-family:monospace}, so the check becomes 
+[y <= x]{font-family:monospace} and [x + 1 < z]{font-family:monospace}.
+
+A pointer cast can create a pointer that is not relatively aligned to
+the referent type of the pointer type. This can happen when:
+
+
+
+1. A pointer is cast to be a pointer to a larger type. For example, if an
+  \arrayptrinst{[short int]{font-family:monospace}} is cast to be an
+  \arrayptrint , the resulting pointer
+  may not be relatively aligned to its bounds for [int]{font-family:monospace}. In the
+  first illustration where [x]{font-family:monospace} points to a4,
+  \arrayptrint [x]{font-family:monospace} is not relatively
+  aligned to [y]{font-family:monospace} for [int]{font-family:monospace}.
+
+* A pointer is cast to be a pointer to a smaller type, and the size of
+  the original referent type is not a multiple of the size of the
+  smaller type. For example, a pointer to a 12-byte struct may not be
+  relatively aligned to its bounds when it is cast to a pointer to an
+  8-byte struct.
+
+The use of struct types to illustrate the second case is intentional.
+For most C implementations, the second case never happens for casts
+involving scalar types. Scalar types are powers of 2 in size (1, 2, 4,
+and 8 bytes). This means that for a cast from a larger scalar type to a
+smaller scalar type, the larger scalar type will always be a multiple of
+the smaller scalar type.
+
+In general, an
+\arrayptrT that is
+relatively aligned for \var{T} is guaranteed to be relatively aligned
+for \arrayptrinst{_S_\/} only
+when \sizeof{\var{S}} is a common factor of
+\sizeof{\var{T}}. In other cases, programmers need to
+supply additional information using program invariants to show that an
+\arrayptr pointer is relatively aligned to its bounds. Of
+course, programmers who are doing casts to use operations on larger
+types instead of operations on smaller types (for example, [int]{font-family:monospace}
+instead of [char]{font-family:monospace}) usually already are doing these checks.
+
+## Representing relative alignment in bounds declarations {  #section-representing-relative-alignment }
+
+
+Bounds expressions are extended with an optional relative alignment 
+clause to represent situations where an \arrayptrT is not relatively 
+aligned to its bounds for type \var{T}:
+
+
+~ Begin Tabbing 
+\var{bounds}=\var{-exp:}&br;
+> \var{\ldots}&br;
+> \bounds{\var{non-modifying-exp}}{\var{non-modifying-exp}}
+   \var{relative-alignment-clause\textsubscript{opt}} &br;
+&br;
+\var{relative-alignment-clause:}&br;
+> \relalign{\var{type}} &br;
+> \relalignval{\var{constant-exp}} 
+
+~ End Tabbing
+This clause is only added to bounds pairs because (by definition) count
+expressions always describe pointers that are relatively aligned to
+their bounds. The optional relative alignment clause specifies a
+relative alignment type \var{T} or the required relative alignment in
+bytes. Given 
+\boundsdecl{\var{x}}{\boundsrel{\var{e1}}{\var{e2}}{\var{T}}},
+[{((\arrayptrchar) \var{x} - (\arrayptrchar) \var{e1}) &perc;
+   \sizeof{\var{T}} == 0}]{font-family:monospace} and
+[{((\arrayptrchar) \var{e2} - (\arrayptrchar) \var{x}) &perc;
+sizeof(\var{T}) == 0}]{font-family:monospace} must be true. If the number of bytes is
+specified, \sizeof{\var{T}} is replaced by the
+constant expression.  The relative alignment clause \relalign{\var{type}}
+is just short-hand for \relalignval{[{sizeof(\var{type})}]{font-family:monospace}}.
+
+## Examples of uses of bounds declarations that specify relative alignment 
+
+
+Here are examples of the use of relative alignment clauses in
+conjunction with pointer casts. In the first example, there is an
+\arrayptr to raw data consisting of characters. The pointer is
+cast to be an \arrayptrint . However,
+the relative alignment remains [char]{font-family:monospace}:
+
+```
+// cast data to be an array_ptr<int> instead
+array_ptr<char> raw_data : bounds(lower, upper) = ...
+array_ptr<int> data : bounds(lower, upper) rel_align(char) =
+    (array_ptr<int>) raw_data; 
+```
+In the second example, the code starts with an
+\arrayptrint. The pointer is cast to
+be an \arrayptrchar. That
+\arrayptr is then cast back to be an
+\arrayptrint . In the second cast, the
+[rel&underscore;align]{font-family:monospace} clause is omitted because the default relative
+alignment for an \arrayptrint is
+[int]{font-family:monospace}.
+
+```
+array_ptr<int> data : bounds(lower, upper) = ...
+array_ptr<char> byte_data : bounds(lower, upper) rel_align(int) = (array_ptr<char>) data;
+array_ptr<int> finish : bounds(lower, upper) = (array_ptr(int>) byte_data; 
+```
+The third example illustrates a subtlety when an
+\arrayptrT has a
+relative alignment that is larger than the actual size of \var{T}. The
+use of pointer arithmetic may require that relative alignment be
+lowered. Suppose that the size of [short int]{font-family:monospace} is 2 bytes and the
+size of an [int]{font-family:monospace} is 4 bytes:
+
+```
+array_ptr<int> d : bounds(lower, upper) = ...
+array_ptr<short int> e : bounds(lower, upper) rel_align(int) = (array_ptr<short int>) d;
+array_ptr<short int> f : bounds(lower, upper) rel_align(short int) = e + 1; 
+```
+While [e]{font-family:monospace} can have relative alignment of [int]{font-family:monospace}, [f]{font-family:monospace}
+cannot because pointer arithmetic is done at the granularity of
+[short int]{font-family:monospace}.
+
+The final example illustrates the use of a dynamic check to allow an
+\arrayptrchar to be cast to a larger type with a larger relative alignment.
+It is a function that does a memory copy and uses an optimized aligned copy if
+possible.  For simplicity, it is assumed that the memory pointed to by
+[dest]{font-family:monospace} and [src]{font-family:monospace} does not overlap and that [sizeof(int)]{font-family:monospace} is 4:
+```
+void copy(array_ptr<char> dest : bounds(dest, dest + num),
+          array_ptr<char> src : bounds(src, src + num), 
+          size_t num)
+{
+  if (num % 4 == 0) {
+    array_ptr<int> aligned_dest : bounds(dest, dest + num) rel_align(char) =
+        (array_ptr<int>) dest;
+    array_ptr<int> aligned_src : bounds(src, src + num) rel_align(char) =
+        (array_ptr<int>) src;
+    int n = num / 4;
+    for (int i = 0; i < n; i++) {
+       aligned_dest[i] = aligned_src[i];
+    }
+ }
+ else {
+    for (int i = 0; i < num; i++) {
+        dest[i] = src[i];
+    }
+} 
+```
+However, [num &perc; 4 == 0]{font-family:monospace} implies that [aligned&underscore;dest]{font-family:monospace} and
+[align&underscore;src]{font-family:monospace} are relatively aligned to their bounds, so the
+relative alignment can be changed:
+
+```
+void copy(array_ptr<char> dest : bounds(dest, dest + num),
+          array_ptr<char> src : bounds(src, src + num), 
+          size_t num)
+{
+  if (num % 4 == 0) {
+    // num % 4 == 0 implies that aligned_dest and aligned_src are relatively
+    // aligned to their bounds.
+    array_ptr<int> aligned_dest : bounds(dest, dest + num) rel_align(int) =
+        (array_ptr<int>) dest;
+    array_ptr<int> aligned_src : bounds(src, src + num) rel_align(int) =
+        (array_ptr<int>) src;
+    int n = num / 4;
+    for (int i = 0; i<n; i++) {
+       aligned_dest[i] = aligned_src[i];
+    }
+ }
+ else  
+   ...
+} 
+```
+Of course, the [rel&underscore;align(int)]{font-family:monospace} is redundant and can be omitted.
+
+## Relative alignment and constant counts 
+
+
+When an \arrayptr with a constant count is cast to another
+\arrayptr type, all the facts about relative alignment are
+easily checkable at compile time. This means that a pointer to data can
+easily be cast to be a pointer to a larger type. Suppose in the
+following example that the size of integers is 4 bytes. A pointer to 8
+bytes of characters can be converted easily a pointer to 2 integers:
+
+```
+char a[] = "0123456";
+array_ptr<char> p : count(8) = a;
+array_ptr<int> r : count(2) = (array_ptr<int>) p; 
+```
+# Pointers to void {  #section-pointers-to-void }
+
+
+The definition of count expressions poses a problem for
+\arrayptrvoid. [Void]{font-family:monospace} is an
+incomplete type and has no defined size, which means that count
+expressions are ill-defined for
+\arrayptrvoid. To address this, a
+variant of count expressions where counts are given in terms of bytes is
+added:
+
+\var{bounds-exp:}
+
+
+~ Begin Quote 
+\ldots
+
+\boundsbytecount{\var{non-modifying-exp}}
+
+~ End Quote
+The bounds declaration \boundsdecl{\var{x}}{\boundsbytecount{\var{e1}}}
+describes the number of bytes that are accessible beginning at \var{x}. 
+Only memory that is at or above \var{x} and below [(\arrayptrchar)]{font-family:monospace}
+\var{x} [+]{font-family:monospace} \var{e1} can be accessed through \var{x}. The type
+of \var{e1} must be an integral type.  The usual C integer conversions are
+applied to \var{e1}.  This bounds declaration is a synonym for 
+\boundsdecl{\var{x}}
+   {\boundsrel{(\arrayptrchar) \var{x}}
+   {(\arrayptrchar) \var{x} [+]{font-family:monospace} \var{e1}}
+   {[char]{font-family:monospace}}}
+
+The standard C library functions for [malloc]{font-family:monospace}, [memcmp]{font-family:monospace}, and
+[memcpy]{font-family:monospace} will be
+given bounds-safe interfaces to avoid breaking existing code as
+described in Section [#section-function-bounds-safe-interfaces]. 
+However, if they were to return checked pointer
+types, their bounds declarations would be:
+
+```
+array_ptr<void> malloc(size_t num) : byte_count(num);
+
+int memcmp(array_ptr<const void> dest : byte_count(num),
+           array_ptr<const void> src : byte_count(num), size_t num);
+
+array_ptr<void> memcpy(array_ptr<void> dest : byte_count(num),
+                       array_ptr<const void> src : byte_count(num), size_t num) :
+    byte_count(num); 
+```
+The return value of [memcpy]{font-family:monospace} is [dest]{font-family:monospace}. The bounds for
+this return value could be described more precisely by:
+
+```
+array_ptr<void> memcpy(array_ptr<void> dest : byte_count(num),
+                       array_ptr<void> src : byte_count(num), size_t num) :
+  bounds((<array_ptr<char>) dest, (array_ptr<char>) dest + num) rel_align(char) 
+```
+# Extent of dataflow-sensitive bounds declarations {  #section-extent-of-declarations }
+
+
+Variables that have bounds declared for them at expression statements
+have dataflow-sensitive bounds declarations. There are two aspects to
+dataflow-sensitive bounds: extent and consistency. The extent of a
+flow-sensitive bounds declaration is the part of the program to which 
+a flow-sensitive bounds
+declaration applies. Within the extent of a flow-sensitive 
+bounds declaration, the
+bounds for the variable for memory dereferences are given by the bounds
+declaration. Consistency is that all the flow-sensitive bounds 
+declarations flowing to a statement agree with each other.
+
+As mentioned in Section [#section-statement-declarations],
+a dataflow-sensitive bounds declaration
+extends to the next assignment to any variable occurring in the bounds
+declaration. There are exceptions for pointer increment and decrement.
+If an assignment
+
+
+~ Begin Compactitem 
+
+
+* increments or decrements a pointer variable ([++]{font-family:monospace},
+  [-\/-]{font-family:monospace}, [+=]{font-family:monospace}, [-=]{font-family:monospace}), and
+
+* the bounds expression for the pointer variable has the form
+  \bounds{\var{e1}}{\var{e2}}, and
+
+* the pointer variable does not occur in \var{e1} or \var{e2},
+
+~ End Compactitem
+then no bounds declaration is needed at the statement containing the
+assignment.
+
+The reason for this exception is that there is obviously a connection
+between the old and the new value of the pointer in the case of a
+pointer increment or decrement. These kinds of assignment statements
+move a pointer within an area of memory and it is reasonable to assume
+that bounds remain the same. However, with other kinds of assignments,
+the before and after values may be unrelated, so re-using bounds could
+lead to unexpected bounds checks failures.
+
+## Definition of extent {  #section-extent-definition }
+
+
+We first define the set of flow-sensitive bounds declarations that apply to a 
+component of a function.  A component is an expression statement,
+variable declaration, or a compound statement. For any flow-sensitive bounds
+declaration for a variable \var{v}, if
+
+
+~ Begin Compactenum 
+
+
+* There is some path from the bounds declaration to the 
+  component, and
+
+* \var{v} occurs in the component, and
+
+* there is no other flow-sensitive bounds declaration for 
+  \var{v} along the path
+
+~ End Compactenum
+then
+
+
+~ Begin Compactenum 
+
+
+* if all the variables occurring in the bounds declaration are 
+  in-scope at the component, and
+  
+~ Begin Compactenum 
+
+
+* No expressions or statements on the path modify a variable
+  occurring in the bounds declaration
+  
+
+* or
+  
+~ Begin Compactenum 
+
+
+* The only expressions or statements on the path that
+   modify a variable occurring in the bounds declaration 
+   are pointer increments or decrements of \var{v}, and
+   
+
+* \var{v} does not occur in the bounds expression, and
+   
+
+* the bounds expression is not a count expression
+   
+~ End Compactenum
+
+~ End Compactenum
+then the bounds declaration applies to the component   
+
+* Otherwise, the bounds declaration \boundsdecl{\var{v}}{\boundsnone}
+   applies to the component.
+
+~ End Compactenum
+## Consistency 
+
+
+These conditions ensure the consistency of bounds declarations:
+
+
+
+1. _Agreement of bounds declarations_\/: If a variable occurring in a
+  function component has more than one bounds declaration that applies
+  to it at the component, then all the bounds declarations applying to
+  it at the component must be syntactically identical. This avoids
+  ambiguity about which bounds declaration applies to an occurrence of a
+  variable. It an error for the bounds declarations to disagree.
+
+* _No missing bounds declarations_\/: If a bounds declaration for a
+  variable applies to a function component, then all paths from the
+  beginning of the function to the function component must have a bounds
+  declaration for the variable along each path.
+
+## Examples {  #examples-consistency }
+
+
+In the following example, a function modifies a variable [end]{font-family:monospace}
+used in the bounds expression for the variable [start]{font-family:monospace} and then
+uses the variable [start]{font-family:monospace} after that. This function will be
+rejected by the compiler.
+
+```
+/* buggy function */
+/* sum integers stored between start and end, where end is not included */
+int sum(array_ptr<int> start : bounds(start, end), array_ptr<int> end)
+{ 
+    end = end + 1; // bounds(start, end) does not hold after this, so program is
+                   // rejected
+    start[5] = 0;
+   ...
+} 
+```
+A correct function declares new bounds for [start]{font-family:monospace}:
+
+```
+/* sum integers stored between start and end, where end is not included */
+int sum(array_ptr<int> start : bounds(start, end), array_ptr<int> end)
+{ 
+    end = end + 1 where start : bounds(start, end - 1);
+    start[5] = 0; // program accepted by compiler; may fail bounds check at 
+                  // run time
+    ...
+} 
+```
+The following example shows the extents of the two bounds declarations for
+[start]{font-family:monospace}.  The bounds declaration at the declaration of [start]{font-family:monospace} and 
+its extent is highlighted in blue. The bounds declaration at the assignment 
+to [end]{font-family:monospace} and its extent is highlighted in yellow:
+
+<!--% The package for highlighting does not work well with the alltt
+% package, so just use a teletype font and handle spacing and line
+% breaking manually.-->
+
+~ Begin Tt 
+\sethlcolor{lightblue}
+/\* sum integers stored between start and end, where end is not included \*/ &br;  
+int sum(array&underscore;ptr<int> start\ :\ \hl{bounds(start, end)}, array&underscore;ptr<int> end)&br;
+\hl{&lcurly;&br;
+\ \ \ \ start\[5\] = 0; // bounds checked using (start, end)}&br;
+[\ \ \ \ end] = \hl{end + 1} where \sethlcolor{lightyellow}\hl{start : bounds(start, end - 1);&br;
+\ \ \ \ start\[5\] = 0; // bounds checked using (start, end - 1)&br;
+[\ \ \ \ ]...&br;
+}&rcurly;
+
+~ End Tt
+Figure [#fig-bounds-extent-choose] expands on the [choose]{font-family:monospace} function earlier. 
+There are 4 explicit bounds declarations for [c]{font-family:monospace}. The bounds declarations
+and their extents are also color-coded. Three bounds declarations for c
+have the form \boundsdecl{c}{\boundscount{clen}}. They must be syntactically
+identical because there are statements that they cover in common. Their
+extents are highlighted in blue.  Another bounds declaration has
+the form \boundsdecl{c}{\boundscount{clen - 1}}.   Its extent is highlighted
+in yellow. It covers code where [c]{font-family:monospace} is incremented and the 
+length is decremented.  The increment invalidates the bounds declaration
+\boundsdecl{c}{\boundscount{clen}}.  A different bounds declaration for [c]{font-family:monospace}
+is needed after the increment.
+
+
+~ Begin Figure { #fig-bounds-extent-choose ; caption:"An expanded version of the choose function from earlier, with extents of different bounds declarations color-coded." }
+<!--% The package for highlighting does not work well with the alltt-->
+<!--% package, so just use a teletype font and handle spacing and line
+% breaking manually.-->
+
+~ Begin Tt 
+/\* use either a or b depending on val \*/&br;
+int choose(int val, array&underscore;ptr<int> a\ :\ count(alen), int alen,&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ \ ]array&underscore;ptr<int> b\ :\ count(blen), int blen)&br;
+&lcurly;&br;
+[\ \ \ \ ]array&underscore;ptr<int> c;&br;
+[\ \ \ \ ]int clen;&br;
+[\ \ \ \ ]int result = 0;&br;
+&br;
+[\ \ \ \ ]if (val) &lcurly;&br;
+[\ \ \ \ \ \ \ \ ]clen = alen;&br;
+[\ \ \ \ \ \ \ \ ]c = a where \sethlcolor{lightblue}\hl{c : count(clen);&br;
+[\ \ \ \ ]&rcurly;}&br;
+[\ \ \ \ ]else &lcurly;&br;
+[\ \ \ \ \ \ \ \ ]clen = blen;&br;
+[\ \ \ \ \ \ \ \ ]c = b where \hl{c : count(clen);&br;
+[\ \ \ \ ]&rcurly;&br;
+[\ \ \ \ ]if (clen > 1) &lcurly;&br;
+[\ \ \ \ \ \ \ \ ]result = c\[0\];&br;
+[\ \ \ \ ]&rcurly;&br;
+&br;
+[\ \ \ \ ]if (cond  &amp;&amp; clen > 1) &lcurly;}&br;
+[\ \ \ \ \ \ \ \ ]c = \hl{c + 1} where \sethlcolor{lightyellow}\hl{c : count(clen - 1);}&br;
+[\ \ \ \ \ \ \ \ ]clen = \hl{clen - 1} where \sethlcolor{lightblue}\hl{c : count(clen);&br;
+[\ \ \ \ \ \ \ \ ]result += c\[0\];&br;
+[\ \ \ \ ]&rcurly;&br;
+&br; 
+[\ \ \ \ ]...&br;
+[\ \ \ \ ]return result;&br;
+}&rcurly;&br;
+
+~ End Tt
+
+~ End Figure
+
+
+## Computing extent {  #section-computing-extent }
+
+
+This section is primarily for compiler implementers. Those readers
+primarily interested in the language may skip it safely. It describes
+how a compiler can determine efficiently which bounds declaration
+applies to uses of variables that have flow-sensitive bounds
+declaration.
+
+The inference process can be done for all \arrayptr variables
+in a function with dataflow-sensitive bounds using a forward dataflow
+analysis [@Aho2007]. The bounds declarations for all occurrences of
+\arrayptr variables in a function can be computed in
+worst-case O(N&circ;2 \* M) time. N is the number of statements in a
+function and M is the number of \arrayptr variables in the
+function. In functions that do not have loops in their control-flow, the
+dataflow analysis can be done in O(N\*M) time.
+
+The dataflow analysis uses a lattice of values, assigning one lattice
+value to each variable at each program point in the function.  
+Figure [#fig-extent-dataflow-lattice] shows the lattice of values.  
+It includes singleton values consisting of the bounds
+expressions in the flow-sensitive bounds declaration for variables in
+the function, \boundsnone (indicating absence of bounds
+information), and [Top]{font-family:monospace} (indicating contradiction or error):
+
+
+~ Begin Figure { #fig-extent-dataflow-lattice ; caption:"The lattice of values used in dataflow computation of extent" }
+
+~ Begin Center 
+~ Snippet
+\begin{tikzpicture}[sibling distance=1in]
+\node[rectangle, minimum size=8pt]{\texttt{Top}}
+  child foreach \name in {\boundsnone, \var{bounds-exp\textsubscript{1}},
+                          \var{bounds-exp\textsubscript{2}}, \ldots}
+     {node{\name} edge from parent[<-, thick]};
+\end{tikzpicture}
+~
+
+
+~ End Center
+
+~ End Figure
+
+ 
+For an assignment to an \arrayptr variable, the existing
+lattice value for the \arrayptr variable is killed, unless
+the special conditions described in Section [#section-extent-of-declarations]
+are met. 
+A new lattice value is generated for the \arrayptr variable. If the
+assignment declares bounds for the \arrayptr variable, the new
+lattice value is the bounds expression in the bounds declaration.
+Otherwise, it is the value \boundsnone.
+
+A declaration of a variable is handled similarly to an assignment,
+except that there will not be any lattice value to kill. Lexical hiding
+of variables involved in bounds declarations is not permitted. If the
+declaration declares bounds for the \arrayptr variable, the
+new lattice value is the bounds expression in the bounds declaration.
+Otherwise, it is the value \boundsnone.
+
+A variable going out of scope kills any existing lattice values in which
+that variable occurs.
+
+At control-flow split points, the lattice values for the
+\arrayptr variables flow to all branches of the split. The
+propagation is dataflow-sensitive but not control-flow sensitive. At
+control-flow join points, the lattice values are unioned (moving upward
+in the lattice). If the lattice values for an \arrayptr
+variable are not the same, the resulting value is [Top]{font-family:monospace}.
+
+# Bounds declarations and loops 
+
+
+Loops often operate on variables declared outside of loops. They may
+read the variables and then update the variables. When these variables
+are \arrayptr variables they must have bounds and the bound
+must be loop invariants.
+
+The common case is that the bounds expression is invariant across all
+iterations of the loop. The earlier [sum]{font-family:monospace} example illustrates
+this. The variable [current]{font-family:monospace} is declared with bounds before a
+loop. The loop modifies [current]{font-family:monospace}, but the bounds for
+[current]{font-family:monospace} do not change:
+
+```
+/* sum integers stored between start and end, where end is not included */
+int sum(array_ptr<int> start where start : bounds(start, end), array_ptr<int> end)
+{ 
+    int sum = 0;
+    array_ptr<int> current : (start, end) = start;
+
+    while (current < end) {
+       sum = *current;
+       current += 1; // bounds do not need to be redeclared here.
+    }
+} 
+```
+A programmer can declare bounds expressions that change on each
+iteration of the loop. This may be necessary if an \arrayptr
+variable is modified to point to different memory during a loop
+iteration. It also may be desirable for performance reasons. In either
+case, there needs to be a loop-invariant bounds declaration.
+
+The following example illustrates this. It is an implementation of
+lexicographic comparisons of two arrays, using one pointer to scan each
+array. The bounds at the variable declarations serve as loop invariant
+bounds. The lower bounds for a variable are declared using the variable
+itself, to reduce register pressure in the loop. This can enable
+compilers to generate better code. Note that an optimizing compiler will
+eliminate the runtime bounds checks easily.
+
+```
+/* lexicographic comparison of two arrays of integers */
+int compare(array_ptr<int> x : bounds(x, x_end), 
+            array_ptr<int> y : bounds(y, y_end)
+            array_ptr<int> x_end,
+            array_ptr<int> y_end)
+{ 
+    while (x < x_end && y < y_end) {
+        if (*x == *y) {  // bounds check: x >= x && x < x_end; easily optimizable
+                         // bounds check: y >= y && y < y_end; easily optimizable
+            x++;
+            y++;
+        }
+        else if (*x < *y) {  // bounds checks here are easily optimizable as well
+            return -1;
+        }
+        else {
+            return 1;
+        }
+    }
+    if (x == x_end && y == y_end) {
+        return 0;
+    }
+    else if (x != x_end) {
+        return 1;
+    }
+    else {
+        return -1; 
+    }
+} 
+```
+# Bundling statements and declarations 
+
+
+Invariant bounds declarations must be valid at the end of every
+statement. The effect of the statement must preserve the validity of the
+bounds declarations. This is too restrictive when multiple statements
+are used to update variables involved in a bounds declaration.
+
+For example, suppose a function was added to the earlier sum example
+that allowed for the buffer to be reallocated:
+```
+// external-scoped variables that hold a buffer and its length
+int buflen = 0;
+array_ptr<int> buf : count(buflen) = NULL;
+
+int sum()
+{
+   int result = 0;
+   for (int i = 0; i < buflen; i++) {
+       result += buf[i]; // bounds checked
+   }
+   return result;
+}
+
+/* buggy resize function */
+void resize(int len) 
+{
+    array_ptr<int> tmp : count(len) = malloc(sizeof(int) * len);
+    copy(tmp, buf, buflen);
+    buflen = len;  // fails at compile-time because the bounds are not true
+    buf = tmp;
+} 
+```
+In this example, the update to [buflen]{font-family:monospace} fails compile-time
+checking because the bounds declaration is not true after the
+assignment. If the two updates are combined into one statement, though,
+the checking would succeed.
+
+```
+void resize(int len) 
+{
+    array_ptr<int> tmp = malloc(sizeof(int) * len);
+    copy(tmp, buf, buflen);
+    buflen = len, buf = tmp; // succeeds, surprisingly
+} 
+```
+This is an interesting difference between regular C, where
+
+```
+expr1, expr2; 
+```
+is always the same as:
+
+```
+expr1;
+expr2; 
+```
+To allow invariant bounds to be checked after several statements or
+initializing declarations, we introduce the notion of a bundled block.
+Assignment statements and declarations can be grouped together using a
+bundled block. Bounds declarations must be valid only at the end of the
+block:
+
+```
+if (cond  && clen > 1) {
+    bundle {
+        c++;
+        clen = clen - 1;
+    }
+} 
+```
+There is some subtlety with bundled blocks and function calls. The
+bounds declarations for any static variables must be valid before any
+function call in a bundle. This is because the called function may make
+use of the static variables. It will assume that the bounds declaration
+holds when it uses the static variables. In general, programmers may
+deal with this requirement by using the idiom of storing function call
+results in temporary variables and updating static variables _en
+masse_\/ after the required function calls have been made.
+
+The C syntax for is extended with:
+
+~ Begin Tabbing 
+\var{statement:}=&br;
+>\var{bundled-statement}[;]{font-family:monospace} &br;
+&br;
+\var{bundled-statement:} &br;
+>[{bundled &lcurly; \var{bundled-item-list\textsubscript{opt}} &rcurly;}]{font-family:monospace} &br;
+&br;
+\var{bundled-item-list:}&br;
+> \var{bundled-item} &br;
+> \var{bundled-item-list bundled-item} &br;
+&br;
+\var{bundled-item:}&br;
+> \var{declaration}&br;
+> \var{expression-statement} 
+
+~ End Tabbing
+# Bounds checks at pointer dereferences {  #section-bounds-checking-indirections }
+
+
+Given \*\var{e1}, where \var{e1} is an expression of type
+\arrayptr, the compiler determines the bounds for \var{e1}
+following the rules in Section [#section-inferring-expression-bounds].
+Special rules are followed in
+[bundled]{font-family:monospace} blocks to determine the bounds for \var{e1}. The
+compiler inserts checks before the memory pointed to by \var{e1} is
+read or written that \var{e1} is non-null and that the value of
+\var{e1} is in bounds.
+
+If \boundsinfer{\var{e1}}{\bounds{\var{e2}}{\var{e3}}},
+the compiler inserts a runtime check that [{\var{e2} <= \var{e1} &amp;&amp;
+\var{e1} < \var{e3}}]{font-family:monospace}. If the runtime check fails, the program
+will be terminated by the runtime system or in, systems that support it,
+a runtime exception will be raised.   If \boundsinfer{\var{e1}}{\boundscount{\var{e2}}},
+this is expanded to \boundsinfer{\var{e1}}{\bounds{\var{e1}}{\var{e1} + \var{e2}}}
+before inserting checks.  Of course a temporary variable would be used to hold the
+value of \var{e1}.
+
+If the default relative alignment has been overridden and
+\boundsdecl{\var{e1}}{\boundsrel{\var{e2}}{\var{e3}}{\var{T}}}, the compiler checks whether
+[{sizeof(referent-type(\var{e1}))}]{font-family:monospace} is a common factor of [{sizeof(\var{T})}]{font-family:monospace}. 
+If it is, it inserts the same
+runtime check as before. Otherwise, it inserts a runtime check that
+[{\var{e2} <= \var{e1} &amp;&amp; \var{e1} + sizeof(\var{T}) - 1 < \var{e3}}]{font-family:monospace}
+
+Consider as an example, `z = *x;` where 
+`x : bounds(x, x + c)`. The compiler will produce code of the form
+
+
+~ Begin Quote 
+```
+dynamic_check(x != null);
+dynamic_check(x <= x && x < x + c);
+z = *t1; 
+```
+
+~ End Quote
+The condition [x <= x]{font-family:monospace} is trivially true. The
+condition [x < x + c]{font-family:monospace} simplifies to [0
+< c]{font-family:monospace}, that is [c > 0]{font-family:monospace}, which is what one
+would expect.
+
+Now suppose pointer arithmetic is involved and [z = \*(x + 5)]{font-family:monospace}. The
+bounds of [x + 5]{font-family:monospace} will be the same as the bounds of [x]{font-family:monospace}.
+The expression [x + 5]{font-family:monospace} must point into the same object as
+[x]{font-family:monospace} for this to be a valid memory access. This means that
+\boundsdecl{[x + 5]{font-family:monospace}}{\bounds{[x]{font-family:monospace}}{[x + c]{font-family:monospace}}}.
+The compiler will produce code of the form:
+
+
+~ Begin Quote 
+```
+dynamic_check(x != null);
+t1 = x + 5;
+dynamic_check(t1 != null && x <= t1 && t1 < x + c);
+z = *t1; 
+```
+
+~ End Quote
+Array subscripting works as expected. For [e1\[e2\]]{font-family:monospace}, the
+compiler computes the bounds of [e1]{font-family:monospace}. The compiler inserts
+runtime checks that [e1 + e2]{font-family:monospace} is within this bounds. For example,
+given `x[5]` where `x : bounds(x, x + c)`, the
+compiler inserts runtime checks that `x <= x + 5 < x + c`. 
+The runtime checks simplify to `5 < c`.
+
+## Evaluation of bounds at bounds checks 
+
+
+The preceding example raises a subtle point, which is when bounds
+expressions are evaluated. Consider the following code:
+
+```
+array_ptr<int> x;
+x = malloc ((sizeof(int) * 5)
+where x : bounds(x, x + 5); 
+```
+When is [x + 5]{font-family:monospace} evaluated?  In this design, 
+the evaluation of a bounds expression in a bounds declaration is
+_deferred_ until a bounds check uses the bounds expression. 
+This avoids the need for temporary storage to 
+hold the value of [x + 5]{font-family:monospace}.  The need for temporary storage would
+be particularly problematic when bounds declarations are extended
+to structures.   It also avoids complications when [x]{font-family:monospace} is
+[null]{font-family:monospace}. Section [#section-bounds-declarations-alternate-semantics] 
+discusses eager evaluation of bounds expressions at
+bounds declarations in more detail and explains why this was not chosen.
+
+# Size computations and integer overflow or wraparound {  #section-integer-overflow-informal }
+
+
+When objects are allocated dynamically in C, programmers have to compute
+the amount of memory to allocate for the objects. It is well-known 
+that integer overflow or wraparound in these computations can lead to buffer
+overruns [@Howard2003;@Mitre2015-128;@Mitre2015-190;@Mitre2015-680;@Dietz2015].
+ In Checked C, the explicit size computations are not enough
+to imply that the bounds for a newly-allocated object are valid.
+Additional side conditions that deal with integer overflow or wraparound
+are needed.
+
+This section informally examines why and the additional conditions that
+are needed. We start by looking at an allocation using malloc with an
+old-style [char \*]{font-family:monospace} return type and a bounds declaration:
+
+```
+extern char *malloc(size_t s) : count(s); 
+```
+An array of type T is allocated with:
+
+```
+array_ptr<T> p : count(e1) = (arrayptr<T>) malloc(sizeof(T) * e1); 
+```
+The size computation in the count expression differs subtly from the
+explicit computation on the right-hand side. In the count expression,
+arithmetic with overflow checking is used, while the explicit
+computation does not have overflow checking. Intuitively, this leads to
+a mismatch when overflow or wraparound can happen, which causes static
+checking to fail.
+
+We expand the count expression to integer arithmetic to make its size
+computation clear. [count(e1)]{font-family:monospace} expands to \bounds{p}{p + e1}. 
+Following the rules in Section [#section-pointers-as-integers],
+the expansion of [p +
+e1]{font-family:monospace} from pointer arithmetic to integer arithmetic depends on the type of
+[e1]{font-family:monospace}.
+
+
+
+* If [e1]{font-family:monospace} is an unsigned integer, [p + e1]{font-family:monospace} expands to
+  [{p +\textsubscript{ovf} sizeof(T) \*\textsubscript{ovf} e1}]{font-family:monospace}
+
+* If [e1]{font-family:monospace} is a signed integer, [p + e1]{font-family:monospace} expands to
+  [{p +\textsubscript{ovf} ((signed&underscore;size&underscore;t) sizeof(T))
+  \*\textsubscript{ovf} e1}]{font-family:monospace}.
+
+The number of bytes added to [p]{font-family:monospace} is the size computation of the
+count expression. We can compare the size computations and see when the
+values differ. We add casts for any implicit conversions that would
+occur in the [malloc]{font-family:monospace} size computation also:
+
+
+~ Begin Longtable 
+{lp{1.75in}p{1.75in}p{1in}}
+\toprule
+Type of e1 & Count size computation & [malloc]{font-family:monospace} size computation &
+Values differ?\tabularnewline
+\midrule
+\endhead
+Unsigned integer & [{sizeof(T) \*\textsubscript{ovf} e1}]{font-family:monospace} &
+[sizeof(T) \* e1]{font-family:monospace} & On overflow\tabularnewline
+Signed integer & [{((signed&underscore;size&underscore;t) sizeof(T))
+\*\textsubscript{ovf} e1}]{font-family:monospace} & [sizeof(T) \* (size&underscore;t) e1]{font-family:monospace} & On
+overflow or when [e1 <]{font-family:monospace} 0.\tabularnewline
+\bottomrule
+
+~ End Longtable
+For correctness, we want the count size computation and the
+[malloc]{font-family:monospace} size computations to produce identical values. This
+implies that malloc did allocate the number of bytes expected by the
+count size computation. We add conditions on [e1]{font-family:monospace} to do this:
+
+
+~ Begin Longtable 
+{ll}
+\toprule
+Type of e1 & Restrictions\tabularnewline
+\midrule
+\endhead
+Unsigned integer & [e1 <= UINT&underscore;MAX/sizeof(T)]{font-family:monospace}\tabularnewline
+Signed integer & [e1 >= 0 and e1 <= INT&underscore;MAX/sizeof(T)]{font-family:monospace}\tabularnewline
+\bottomrule
+
+~ End Longtable
+This has an interesting implication for any function that allocates an
+array of \var{T}. If the count of elements is constant, of course these
+conditions are trivial. If the count is non-constant, the function
+must do the following checks:
+
+
+
+* If the count is a signed integer, the function must check that the
+  count &gt;= 0 before trying to allocate the array.
+
+* If the size of \var{T} is larger than 1 byte, the function must check that the
+  count is less than the upper bound as well.
+
+When retrofitting existing code to use checked pointers, the code may be
+unprepared for overflow or wraparound to happen during allocation. This
+suggests that uses of [malloc]{font-family:monospace} should be replaced by slightly
+higher-level functions that takes the element count and the size of
+elements and handle overflow. C already has a function that is suitable
+for unsigned integer counts:
+
+```
+void *calloc(size_t nobj, size_t size); 
+```
+A signed version is needed too:
+```
+void *signed_calloc(signed_size_t nobj, size_t size); 
+```
+However, [calloc]{font-family:monospace} also zeros the allocated memory.  For the sake of efficiency,
+new allocation functions that compute sizes but do not zero memory may be needed.

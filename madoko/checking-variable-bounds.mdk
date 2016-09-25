@@ -1,0 +1,1622 @@
+<!--% !Tex root = checkedc.tex-->
+
+# Checking validity of bounds for variables {  #chapter-checking-bounds }
+
+
+This chapter describes basic rules for determining the validity of
+bounds declarations in a C translation unit. In general, these rules do
+not include any inference steps. Inference steps for reasoning about
+bounds are described in Chapter [#chapter-simple-invariants].
+
+Section [#section-inferring-expression-bounds]
+describes how to determine the bounds for an expression of
+type \arrayptr that does not have any assignments within it.
+We start with a set of bounds that are true about variables before the
+evaluation of the expression, called the context, and describe the
+bounds for the value of the expression.
+Section [#section-checking-assignment-expressions]
+then describes handling assignment expressions, assuming
+that no assignments are nested within the expression. For an assignment
+expression, we must determine the updated context in addition to the
+value of the expression. The updated context contains new bounds for any
+variables assigned to by the expression.
+Section [#section-checking-nested-assignment-expressions]
+combines the concepts and describes handling expressions
+with nested assignments expressions.
+Section [#section-checking-expression-statements] 
+describes how to validate expression statements. 
+Section [#section-checking-function-call-arguments]
+describes validating function call arguments.
+
+Because this section covers bounds for \arrayptr variables,
+not data structures with \arrayptr data, certain expressions
+are not covered here. This includes member references and expressions
+that load or store \arrayptr values through pointers. These
+expressions are covered in Chapters [#chapter-structure-bounds] and
+[#chapter-pointers-to-data-with-arrayptrs].
+Section [#section-bounds-checking-indirections] does discuss how to 
+insert bounds checking at uses of the
+indirection operator ([\*]{font-family:monospace}). This is different than discussing the
+bounds of the values _returned_\/ or _stored_\/ through the
+indirection operator.
+
+# Reducing the number of syntactic cases 
+
+
+To simplify checking, in-line return bounds expressions are replaced
+with the form that uses a name for the return value. The form
+\boundsdecl{\var{f}(\ldots)}{\var{e1}} is changed to 
+[{\var{f}(\ldots) \keyword{where}
+  \boundsdecl{[return&underscore;value]{font-family:monospace}}{e1}}]{font-family:monospace}.
+The [count]{font-family:monospace} and
+[byte&underscore;count]{font-family:monospace} bounds expressions are also expand to bounds expressions.
+The form \boundsdecl{\var{x}}{\boundscount{\var{e1}}}
+is replaced with \boundsdecl{\var{x}}{\bounds{\var{x}}{\var{x} [+]{font-family:monospace} \var{e1}}}
+and \boundsdecl{\var{x}}{\boundsbytecount{\var{e1}}}
+is replaced with \boundsdecl{\var{x}}{\bounds{(\arrayptrchar) \var{x}}{(\arrayptrchar)
+\var{x} + \var{e1}}}. For now, we ignore the
+additional side conditions on count expressions. Checking of these
+conditions will be addressed in Chapter [#chapter-simple-invariants].
+
+Finally, relative alignment is made explicit for all bounds
+declarations: \boundsdecl{\var{x}}{\bounds{\var{e2}}{\var{e3}}} is expanded to
+\boundsdecl{\var{x}}{\boundsrelval{\var{e2}}{\var{e3}}{[{sizeof(typeof(\var{x}))}]{font-family:monospace}}}.
+For code without explicit or implicit casts of \arrayptr s, relative
+alignment can be ignored.
+
+In the rules below, we sometimes use shorter syntactic forms for
+brevity. The shorter forms should be replaced with the full forms before
+using the rules.
+
+# Inferring valid bounds for expressions without nested assignment expressions {  #section-inferring-expression-bounds }
+
+
+We first discuss determining valid bounds for expressions that do not
+have assignment expressions nested within them. The bounds for an
+expression is always determined with respect to a context (bounds for
+variables read by the expression). We will use $\vdash$ to denote the
+valid bounds for an expression. The notation \boundsinfer{\var{e}}{\var{bounds-exp}}
+means that expression \var{e} has valid bounds \var{bounds-exp}.
+
+At times, we need to discuss bounds that are given in terms of the value
+of the current expression. For example, a function call expression may
+return an \arrayptr pointer to an array of constant size
+\var{n}. The bounds for that pointer value would be (the
+\arrayptr pointer, the \arrayptr pointer +
+\var{n}). We use the special variable [current&underscore;expr&underscore;value]{font-family:monospace} to
+denote the "current value of the expression."[^fn-522] The bounds for an
+expression may involve using the bounds for a subexpression where the
+special variable [current&underscore;expr&underscore;value]{font-family:monospace} occurs. If the "current
+value'' of the expression changes, the uses of
+[current&underscore;expr&underscore;value]{font-family:monospace} from subexpressions must be adjusted to
+counter the change. Bookkeeping rules for making this adjustment will be
+described in sections that treat expressions with subexpressions.
+
+[^fn-522]: 
+    We are open to
+      suggestions on the name for this special symbol. We considered the
+      term 'self', but chose not to use because it is anthromorphic and not
+      particularly descriptive. We also considered the term 'this', but that
+      has specific meaning to programmers who also use object-oriented
+      languages, so it is likely to cause confusion.
+
+## Null pointers 
+
+
+The bounds for 0 is the [any]{font-family:monospace} bounds:
+
+\boundsinfer{0}{\boundsany}
+
+## Variables {  #section-checking-variables }
+
+
+Suppose there is a use of some variable \var{x}.
+
+
+
+* If \var{x} has type \arrayptr, the bounds are the result of
+  the analysis in Section [#section-extent-definition]
+  for this occurrence of \var{x}.
+
+* If \var{x} has type \ptrT, 
+  \boundsinfer{\var{x}}{\boundsrel{\var{x}}{\var{x} [+ 1]{font-family:monospace}}{\var{T}}}.
+   On the right-hand side, \var{x} is reinterpreted as having \arrayptr type.
+
+* If \var{x} has type
+  \spanptrT, 
+  \boundsinfer{\var{x}}{\boundsrel{\var{x}[.lower&underscore;bound]{font-family:monospace}}
+   {\var{x}[.upper&underscore;bound]{font-family:monospace}}
+   {\var{T}}}
+
+* If \var{x} has an array type, the rules depend on whether \var{x}  is a parameter
+  variable.  Typechecking in C treats a parameter variable with the type "array of \var{T}"
+   as though it has the type "pointer to \var{T}".   It does not enforce 
+  at function calls that actual arguments have the required dimension size.  This means
+  that the declared outermost bounds cannot be trusted for parameters with unchecked
+  array types.  In contrast, local variables and externally-scoped variables are allocated 
+  space for their declared types.  Declared dimension information for them can be trusted 
+  regardless of whether they have checked or unchecked array types.  Checking of bounds 
+  declarations for checked arrays  enforces that actual arguments meet the required
+  dimension size.
+
+
+* If 
+
+
+* \var{x} is a local variable or an externally scoped variable 
+
+* or \var{x} is a parameter variable with a checked array type
+
+and \var{x} has a known number of elements \var{n}, then  
+  \boundsinfer{\var{x}}{\boundscount{\var{n}}}.
+
+* Otherwise, the bounds are the result of the analysis in 
+  Section [#section-extent-definition] for this occurrence of \var{x}.
+
+
+
+* Otherwise \var{x} has \boundsnone.
+
+## Address-of expressions {  #section-address-of-expression-bounds }
+
+
+There are three kinds of address-of expressions:
+
+
+* Address of a variable ([{&amp;\var{x}}]{font-family:monospace}): a variable \var{x} with type \var{T} 
+whose address is taken is considered to be an array of one element:
+
+\boundsinfer{[{&amp;\var{x}}]{font-family:monospace}} 
+   {\boundsrel{[{&amp;\var{x}}]{font-family:monospace}}{[{&amp;\var{x} + 1}]{font-family:monospace}}{\var{T}}}.
+   
+
+* Address of a pointer dereference operation ({[{&amp;\*\var{e}}]{font-family:monospace}}):
+The address-of operation and the pointer dereference operation cancel. 
+The bounds are the bounds of the underlying expression. 
+If \boundsinfer{\var{e}}{\var{bounds-exp}}, then
+\boundsinfer{[{&amp;\*\var{e}}]{font-family:monospace}}{\var{bounds-exp}}.
+
+* Address-of a subscripting expression ([{&amp;\var{e1}\[\var{e2}\]}]{font-family:monospace}):
+This is the same as taking the address of a pointer dereference operation.
+According to the C semantics, [{\var{e1}\[\var{e2}\]}]{font-family:monospace} is equivalent
+to [{\*(\var{e1} + \var{e2})}]{font-family:monospace}.  If 
+\boundsinfer{\var{e1} + \var{e2}}{\var{bounds-exp}}, then
+\boundsinfer{[{&amp;\var{e1}\[\var{e2}\]}]{font-family:monospace}}{\var{bounds-exp}}.
+
+## Function calls {  #section-inferring-bounds-for-function-calls }
+
+
+Let \var{f} be the name of a function that returns an
+\arrayptr value (pointers to functions will be handled later).
+Suppose there is a function call expression of the form
+\var{f}[(]{font-family:monospace}\var{e1 \ldots en}[)]{font-family:monospace}:
+
+
+
+1. If \var{f} has a bounds declaration for the return value of the form
+  [return&underscore;value :]{font-family:monospace} \var{exp1}, then
+
+  
+
+* Any arguments that correspond to formal parameters occurring in
+   \var{exp1} must be valid non-modifying expressions. If they are
+   not, \boundsinfer{\var{f}[{(\var{e1} \ldots \var{en})}]{font-family:monospace}}{\boundsnone}.
+  
+
+* Otherwise, substitute [{\var{e1} \ldots \var{en}}]{font-family:monospace} for the formal
+   parameters of \var{f} occurring in \var{exp1}. Also substitute the
+   special symbol \exprcurrentvalue for
+   [return&underscore;value]{font-family:monospace}. These substitutions produce \var{exp2}.
+   \boundsinfer{\var{f}[{(\var{e1} \ldots \var{en})}]{font-family:monospace}}{\var{exp2}}.
+  
+
+
+* If \var{f} does not have a bounds declaration for its return value,
+  then \boundsinfer{\var{f}[{(\var{e1} \ldots \var{en})}]{font-family:monospace}}{\boundsnone}.
+
+The special variable [return&underscore;value]{font-family:monospace} may appear \var{exp1}. It
+is the value of the function call expression, so it is replaced with the
+special variable \exprcurrentvalue.
+
+There needs to be validation that the bounds for argument expressions
+match the required bounds for formal parameters. This is described in
+Section [#section-checking-function-call-arguments].
+
+The following code provides examples of function call expressions where
+bounds need to be computed. In the code, the programmer wraps a call to
+[malloc]{font-family:monospace} in an allocation helper, [alloc&underscore;helper]{font-family:monospace}. The
+function [alloc&underscore;helper]{font-family:monospace} returns an \arrayptr value
+that is passed as an argument to [init]{font-family:monospace}, which initializes the array
+and returns the \arrayptr value.
+```
+array_ptr<int> alloc_helper(int n) : count(n)
+{
+    array_ptr<int> result : count(n) = malloc((sizeof(int) * n);
+    return result;
+}
+
+array_ptr<int> init(array_ptr<int> target : count(s), 
+                    int s) : count(s)
+{
+    for (int i = 0; i < count; i++) {
+         target[i] = i;
+    }
+
+    return target;
+}
+
+void go(int size) 
+{
+    array_ptr<int> x : count(size) = init(alloc_helper(size), size);
+    ...
+} 
+```
+First, syntactic forms for bounds expressions are expanded to eliminate
+count expressions and in-line return expressions, as well as make
+relative alignment explicit.
+
+```
+array_ptr<int> alloc_helper(int n)
+where return_value : bounds(return_value, return_value + n) rel_align(int)
+{
+       array_ptr<int> result : bounds(result, result + n) rel_align(int) =
+         malloc((sizeof(int) * n);
+       return result;
+}
+
+array_ptr<int> init(array_ptr<int> target : bounds(target, target + s) rel_align(int), 
+                    int s) 
+where return_value : bounds(return_value, return_value + s) rel_align(int)
+{
+    for (int i = 0; i < count; i++) {
+         target[i] = i;
+    }
+
+    return target;
+}
+
+void go(int size) 
+{
+    array_ptr<int> x : bounds(x, x + size) rel_align(int) = 
+      init(alloc_helper(size), size);
+    ...
+} 
+```
+The valid bounds for the call to [init(alloc&underscore;helper(size),
+size)]{font-family:monospace} in [go]{font-family:monospace} are computed using the return bounds for
+[init]{font-family:monospace}:
+
+```
+return_value : bounds(return_value, return_value + s) rel_align(int) 
+```
+First, there is a check that all the actual arguments corresponding to
+the formal parameters used by the return bounds expression are valid
+non-modifying bounds expressions. This check succeeds even though the
+first actual argument [alloc&underscore;helper(size)]{font-family:monospace} is not a valid bounds
+expression. The formal parameter [target]{font-family:monospace} is not used by the
+return bounds expression.
+
+Next, the actual arguments are substituted for the formal parameters and
+\exprcurrentvalue is substituted for [return&underscore;value]{font-family:monospace}.
+The argument [size]{font-family:monospace} is substituted for [s]{font-family:monospace}, producing
+```
+init(alloc\_helper(size), size) \(\vdash\) 
+        bounds(\exprcurrentvalue, \exprcurrentvalue + size) rel_align(int) 
+```
+It would not be possible to represent the bounds if [size]{font-family:monospace} were a
+function call too:
+```
+array_ptr<int> x = init(alloc_helper(getsize()), getsize()); 
+```
+Function calls are not valid in bounds expressions:
+
+```
+bounds(expr_current_value, current_expr_value + getsize())  // illegal 
+```
+The solution would be to assign the result of [getsize(]{font-family:monospace}) to a
+variable:
+```
+int tmp = getsize();
+   array_ptr<int> x = init(alloc_helper(tmp), tmp); 
+```
+The parameters to the call to [init]{font-family:monospace} also need to be validated
+(see Section [#section-checking-function-call-arguments]). This
+requires determining the valid bounds for [alloc&underscore;helper(size)]{font-family:monospace}. The
+return bounds for [alloc&underscore;helper]{font-family:monospace} are used:
+```
+return_value : bounds(return_value, return_value + n) rel_align(int) 
+```
+First, there is a check that the actual arguments that correspond to
+formal parameters used in the return bounds are valid non-modifying
+expressions. The only argument is the variable size, so this check
+succeeds. Next, [size]{font-family:monospace} is substituted for [n]{font-family:monospace} and
+\exprcurrentvalue is substituted for [return&underscore;value]{font-family:monospace}, producing:
+```
+alloc\_helper(size) \(\vdash\) bounds(\exprcurrentvalue, \exprcurrentvalue + size) 
+                         rel_align(int) 
+```
+## Pointer arithmetic 
+
+
+The range of memory accessible through pointer arithmetic expressions
+remains unchanged from the underlying pointer. In other words, for
+\boundsinfer{\var{x}}{\var{bounds-exp}}, the bounds expression for any
+pointer arithmetic involving \var{x} is the same as the one for
+\var{x}. This is because that C semantics for pointer arithmetic is
+that if \var{x} points to an object at runtime, any pointer arithmetic
+involving \var{x} must produce a pointer to the same object. The bounds
+of the object in memory are not changed by the pointer arithmetic.
+
+We first cover the typical situation where the relative alignment type
+for a pointer in a pointer operation matches the referent type of the
+pointer. Given a pointer operation of the form \var{x op e1}, where \[var{x}
+has an \arrayptr type, \var{e1} has an integral type, and
+\var{op} is addition or subtraction, the memory that can be accessed
+through \var{x op e1} is the same memory that can be accessed through
+\var{x}:
+
+
+
+* If \var{x} is a pointer to \var{T} and 
+  \boundsinfer{\var{x}}{\boundsrel{\var{e2}}{\var{e3}}{\var{T}}},
+  then \boundsinfer{\var{x} \var{op} \var{e1}}{\boundsrel{\var{e2}}{\var{e3}}{\var{T}}}.
+
+This can be extended to pointer operations of the form \var{e4 op e1},
+where \var{e4} has type
+\arrayptrT as
+follows:
+
+
+
+* If \var{e4} is a pointer to \var{T} and 
+  \boundsinfer{\var{e4}}{\boundsrel{\var{e2}}{\var{e3}}{\var{T}}}
+  then \boundsinfer{\var{e4 op e1}}{\boundsrel{\var{e2}}{\var{e3}}{\var{T}}}
+
+Here is the full rule that handles the situation where the relative
+alignment of the pointer differs from the size of the referent type of
+the pointer. GCD computes the greatest common divisor of two integers.
+The prior rules are just special cases of this rule:
+
+
+~ Begin Quote 
+If \var{e4} is a pointer to \var{T} and 
+\boundsinfer{\var{e4}}
+   {\boundsrel{\var{e2}}
+   {\var{e3}}
+   {\var{c}}}
+then \boundsinfer{\var{e4 op e1}}
+   {\boundsrel{\var{e2}}
+   {\var{e3}}
+   {[{GCD(\var{c}, sizeof(\var{T}))}]{font-family:monospace}}}.
+
+~ End Quote
+### Pointer arithmetic for unchecked pointer types 
+
+
+Pointer arithmetic involving an \arrayptr value checks that
+the value is non-null and generates a runtime error if it is. This check
+is important because a null pointer may have invalid bounds (this
+follows from the definition of the meaning of bounds in 
+Section [#section-bounds-declarations]). It
+prevents a null pointer that has invalid bounds from being used to create a
+non-null pointer with valid bounds, which could then be used to access
+memory.
+
+Because the meaning of unchecked pointers has not changed, pointer
+arithmetic involving a null unchecked pointer may not generate a runtime
+error. The rules for array&underscore;ptr pointer arithmetic can be applied to
+unchecked pointer arithmetic, however, provided that a side condition that
+the pointer expression is non-null is added:
+
+
+~ Begin Quote 
+If \var{e4} is a pointer to \var{T} and it can be proved that
+\var{e4} [!= 0]{font-family:monospace} and 
+\boundsinfer{\var{e4}}{\boundsrel{\var{e2}}{\var{e3}}}{\var{c}}, then
+\boundsinfer{\var{e4 op e1}}{\boundsrel{\var{e2}}{\var{e3}}
+   {[{gcd(\var{c},\sizeof{\var{T}})}]{font-family:monospace}}}.
+
+~ End Quote
+Chapter [#chapter-simple-invariants]
+provides a general framework for checking side-conditions as
+part of checking bounds declarations.
+
+### Treatment of expr&underscore;current&underscore;value 
+
+
+If the special variable \exprcurrentvalue occurs in
+\bounds{\var{e2}}{\var{e3}}, then
+\exprcurrentvalue must be adjusted as follows:
+
+
+
+* If \var{op} is [+]{font-family:monospace}, substitute [\exprcurrentvalue -]{font-family:monospace}
+  \var{e1} for all occurrences of \exprcurrentvalue in
+  \bounds{\var{e2}}{\var{e3}}
+
+* If \var{op} is [-]{font-family:monospace}, substitute [\exprcurrentvalue +]{font-family:monospace}
+  \var{e1} for all occurrences of \exprcurrentvalue in
+  \bounds{\var{e2}}{\var{e3}}.
+
+The reasoning behind this is that the current value of the expression has
+changed as the result of \var{op} \var{e1}. An adjustment in the
+opposite direction of equal magnitude must be made for occurrences of
+\exprcurrentvalue.
+
+The following example illustrates the treatment of
+\exprcurrentvalue. Consider the prior example that had a
+function called [alloc&underscore;helper]{font-family:monospace} that returned some
+newly-allocated memory. Suppose there is an expression that offsets a
+pointer returned by a call to [alloc&underscore;helper]{font-family:monospace}.
+
+```
+alloc_helper(size) + 2 
+```
+To compute the bounds for this expression, first the valid bounds for
+[alloc&underscore;helper(size)]{font-family:monospace} are computed:
+
+```
+alloc\_helper(size) \(\vdash\) bounds(\exprcurrentvalue, \exprcurrentvalue + size) 
+```
+Next, [\exprcurrentvalue - 2]{font-family:monospace} is substituted for
+\exprcurrentvalue&thinsp; yielding:
+
+```
+alloc\_helper(size) + 2 \(\vdash\) (\exprcurrentvalue - 2, \exprcurrentvalue - 2 + size) 
+```
+Now, suppose the pointer is being adjusted to insert some blank padding
+at the beginning of the newly-allocated object. We can remove the
+occurrence of [\exprcurrentvalue - 2]{font-family:monospace} in the upper bound by
+over-allocating in the expression:
+
+```
+alloc_helper(size + 2) + 2 
+```
+The valid bounds for [alloc&underscore;helper(size + 2)]{font-family:monospace} are:
+
+```
+alloc\_helper(size + 2) \(\vdash\) bounds(\exprcurrentvalue, \exprcurrentvalue + size + 2) 
+```
+The valid bounds for the entire expression are:
+
+```
+alloc\_helper(size + 2) + 2 \(\vdash\) bounds(\exprcurrentvalue - 2,
+                                        \exprcurrentvalue - 2 + size + 2) 
+```
+which can be simplified to:
+
+```
+alloc\_helper(size + 2) + 2 \(\vdash\) bounds(\exprcurrentvalue - 2, 
+                                        \exprcurrentvalue + size) 
+```
+As we will explain in Chapter [#chapter-simple-invariants], 
+it is fine to narrow a bounds by
+adding a positive constant to the lower bounds. This allows us to adjust
+the bounds to what would be desired when extra padding is inserted:
+
+```
+alloc\_helper(size + 2) + 2 \(\vdash\) bounds(\exprcurrentvalue, 
+                                        \exprcurrentvalue + size) 
+```
+## Cast expressions {  #section-cast-expressions }
+
+
+Given a cast expression of the form [{(\var{T})}]{font-family:monospace} \var{e},
+the bounds for \var{e} are determined. The bounds for
+\var{e} are used as the bounds for the entire expression.
+
+If the special variable \exprcurrentvalue appears in the
+bounds for \var{e},
+
+
+
+* If T is an integral type large enough to hold a pointer or a pointer
+  type, let \var{S} be the type of \var{e}. The expression
+  [{((\var{S}) \exprcurrentvalue)}]{font-family:monospace} is substituted for
+  all occurrences of \exprcurrentvalue.
+
+* Otherwise, the bounds of \var{e} are  altered to \boundsnone.
+
+## Conditional expressions 
+
+
+Given an expression of the form \var{e1} [?]{font-family:monospace} \var{e2}
+[:]{font-family:monospace} \var{e3}, the bounds for \var{e2} and \var{e3} are
+determined. They must be syntactically identical (after putting the
+bounds into a normal form). The bounds for \var{e2} are used as the
+bounds for the entire expression.
+
+If the special variable \exprcurrentvalue occurs in the
+bounds for \var{e2}, it is left unchanged. The conditional expression
+does not change the value returned by one if its branches, so no
+adjustment to \exprcurrentvalue is needed.
+
+_This is an expression where a conditional bounds expression could
+be used to represent the resulting range.  Another alternative that works
+with current syntax would be to create upper/lower-bound expressions
+that use e1 such as (e1 ? lower-bound(e2) : lower-bound(e3), e1 ?
+upper-bound(e2) : upper-bound(e3). For now, we defer discussion of both
+alternatives. _\/
+
+## Comma expressions 
+
+
+Given an expression of the form \var{e1} [,]{font-family:monospace} \var{e2}, the
+bounds for \var{e2} are determined. The bounds for \var{e2} are used
+as the bounds for the entire expression.
+
+If the special variable \exprcurrentvalue occurs in the
+bounds for \var{e2}, it is left unchanged.
+
+# Bounds for assignment expressions {  #section-checking-assignment-expressions }
+
+
+For an assignment expression of the form \var{x} [=]{font-family:monospace} \var{e},
+where \var{x} is a variable and \var{e} is an expression, we start
+with a context that is true before the evaluation of the assignment
+expression. We determine the context that will be true after the
+evaluation of the assignment expression and the bounds for the value
+returned by the assignment expression.
+
+This seems straightforward at first. If \var{x} has type
+\arrayptr, compute the bounds for \var{e} and update the
+context so that the bounds for \var{x} is the bounds of \var{e}.
+However, there is a problem. The bounds for \var{e} is determined
+\var{before} \var{x} changes value. When \var{x} changes value, the bounds
+for \var{e} may no longer be true if \var{x} appears in the bounds.
+The context could contain uses of \var{x} also in bounds expressions.
+
+A simple solution is to invalidate bounds expressions where x appears in
+the bounds. This does not work well when a variable that appears in its
+own bounds declaration is incremented or decremented. Consider the
+following example:
+```
+array_ptr<int> x : bounds(x, high) = ...
+int sum = 0;
+while (x < high) {
+    sum += *x;
+    x++;  // bounds for x would be undefined for the simple solution
+} 
+```
+A possible solution is to require programmers to copy variables in loops
+that are modified using only pointer arithmetic to temporary variables
+before the loop. The temporary variables could then be used in bounds.
+However, this might increase register pressure and worsen performance.
+
+One can do better than that for loop induction variables, which are
+variables that are incremented or decremented by a constant in a loop.
+Condit _et al._\/ observe that some assignment expressions are
+invertible: the old value of a variable can be calculated from the new
+value . One can update the bounds by substituting the inverted
+expression in place of the variable. The updated bounds can then be
+narrowed to satisfy loop bounds invariants. Invertible expressions
+include the addition and subtraction expressions that update loop
+induction variables.
+
+The updated context will be determined in three steps. First, if
+\var{x} has type \arrayptr, the context is updated for
+\var{x} using bounds expressions that use the _old_\/ value of \var{x}:
+
+
+
+1. If \boundsinfer{\var{e}}{\var{exp}}, then the context is updated with
+  \boundsdecl{\var{x}}{\var{exp}}.
+
+* Otherwise, the context is updated with \boundsdecl{\var{x}}{\boundsnone}
+   to indicate that \var{x} has no valid bounds.
+
+Second, the context is updated to reflect the change in the value of
+\var{x}:
+
+
+
+* If the expression being assigned is invertible, the right-hand side of
+  any bounds expression that uses \var{x} will be updated to use an
+  expression that inverts the new value to compute the old value.
+
+* Otherwise, any bounds expression that involves x is invalidated
+
+An assignment expression in C has a value. The bounds of the assignment
+expression will be the bounds of \var{x} at this point.
+
+Third, the special variable \exprcurrentvalue is eliminated
+from the bounds of \var{x}, if it was introduced because it occurred in
+\boundsdecl{\var{e}}{\var{exp}}. Recall that
+\exprcurrentvalue stands for the current value of an
+expression whose bounds is being determined. Because the value of
+\var{e} has been assigned to \var{x}, \var{x} is substituted for
+\exprcurrentvalue in the bounds for x.
+
+## Invertibility 
+
+
+The following examples illustrate invertibility and updating bounds. For
+the first example, suppose there is a declaration of an
+\arrayptr variable followed by a decrement of a variable
+involved in the bounds:
+
+```
+array_ptr<int> a : count(len) = ...
+len = len - 1 
+```
+The original value of [len]{font-family:monospace} can be computed from the new value.
+In this case, a valid new bounds after the decrement of [len]{font-family:monospace} is
+[count(a) == len + 1.]{font-family:monospace} The bounds for [a]{font-family:monospace} after the
+assignment are:
+```
+len = len - 1
+where a : count(len + 1); 
+```
+For the second example, consider an update to a pointer variable that
+appears in its own bounds:
+```
+array_ptr<int> p : bounds(p, high) = ...         
+while (p < high) {
+    ...
+          p = p + 1;
+} 
+```
+First, the new bounds expression for the expression `p + 1` is
+computed. It is the same as the original bounds expression
+`bounds(p, high)`. Because p is modified by the assignment, the
+inverted expression for `p + 1` is substituted into 
+`(p, high)`. The inverted expression for `p + 1` is `p - 1`.
+Substituting `p-1` for `p` leads to bounds of the form
+`bounds(p - 1, high)`:
+
+```
+while (p < high) {
+    ...
+          p = p + 1 where p : bounds(p - 1, high);
+} 
+```
+Bounds ty is preserved when the range of a bounds expression is
+narrowed. [(p - 1, high)]{font-family:monospace} implies that [(p, high)]{font-family:monospace} is a
+valid bounds expression. This reestablishes the loop bounds invariant
+for [p]{font-family:monospace} of [(p, high)]{font-family:monospace}.
+
+```
+while (p < high) {
+    ...
+          p = p + 1 where p : bounds(p, high);
+} 
+```
+The correctness of narrowing depends on pointer arithmetic overflow
+for checked pointer types being a runtime error. For a lower bound \var{e1} in a bounds
+expression, we can only substitute \var{e2} for \var{e1} as the lower
+bound if \var{e2} &gt;= \var{e1}. The identity [p > p - 1]{font-family:monospace} 
+holds only if overflow is a runtime error.
+
+## Invertible expressions 
+
+An expression is invertible with respect to a variable x if:
+
+
+
+1. The expression is x
+
+* or
+
+  
+
+1. The operator in the expression is an addition, subtraction, one's
+   complement, unary minus, unary plus, exclusive-or, a bit-preserving
+   cast operator, or a widening cast operator, and
+  
+
+* The variable x occurs only in one argument of the operation and that
+   argument is an invertible expression with respect to \var{x}
+  
+
+* Any other argument of the operation is a non-modifying expression,
+   excluding non-modifying expressions that are or include member
+   references, indirect member references, or pointer dereferences.
+  
+
+The addition and subtraction operations must be for checked pointer
+arithmetic or unsigned integer arithmetic. An implementation may allow
+integral addition and subtraction operations to be invertible if
+integral addition and subtraction are defined as two's complement
+arithmetic where extra bits are discarded on overflow. However, this
+introduces the possibility of non-portable code.
+
+Given the expression [x =]{font-family:monospace} \var{e}, where [x]{font-family:monospace} occurs once
+in \var{e}, mathematical rules are applied to solve for [x]{font-family:monospace} in
+\var{e}. We generalize the left-hand side from x to an expression
+\var{f} and define [inverse(]{font-family:monospace}\var{f}[,]{font-family:monospace}
+\var{e}[)]{font-family:monospace} as follows:
+
+
+~ Begin Longtable 
+{@ll@}
+\toprule
+[Given inverse(]{font-family:monospace}\var{f}[,]{font-family:monospace} \var{e}[), where]{font-family:monospace} &
+[the result is:]{font-family:monospace}\tabularnewline
+\midrule
+\endhead
+\var{e} = [x]{font-family:monospace} & \var{f}\tabularnewline
+\var{e} = [{&tilde;}]{font-family:monospace}\var{e1} &
+[{inverse(&tilde;}]{font-family:monospace}\var{f},
+\var{e1}[)]{font-family:monospace}\tabularnewline
+e = [-]{font-family:monospace}\var{e1} & [inverse(-]{font-family:monospace}\var{f},
+\var{e1}[)]{font-family:monospace}\tabularnewline
+\var{e} = [+]{font-family:monospace}\var{e1} & [inverse(+]{font-family:monospace}\var{f},
+\var{e1}[)]{font-family:monospace}\tabularnewline
+\var{e} = [(]{font-family:monospace}\var{t1}[)]{font-family:monospace} \var{e1}, where \var{e1} has
+type \var{t2} & [inverse((]{font-family:monospace}\var{t2}[)]{font-family:monospace} \var{f},
+\var{e1}[)]{font-family:monospace}\tabularnewline
+and [{(\var{t1})}]{font-family:monospace} is not a narrowing cast & &br;
+\var{e} = \var{e1} [+]{font-family:monospace} \var{e2}, where [x]{font-family:monospace} occurs in
+\var{e1} & [inverse(]{font-family:monospace}\var{f} [-]{font-family:monospace} \var{e2},
+e1)\tabularnewline
+\var{e} = \var{e1} [+]{font-family:monospace} \var{e2}, where [x]{font-family:monospace} occurs in
+\var{e2} & [inverse(]{font-family:monospace}\var{f} [-]{font-family:monospace} \var{e1},
+\var{e2})\tabularnewline
+\var{e} = \var{e1} [-]{font-family:monospace} \var{e2}, where [x]{font-family:monospace} occurs in
+\var{e1} & [inverse(]{font-family:monospace}\var{f} [+]{font-family:monospace} \var{e2},
+\var{e1})\tabularnewline
+\var{e} = \var{e1} [-]{font-family:monospace} \var{e2}, where [x]{font-family:monospace} occurs in
+\var{e2} & [inverse(]{font-family:monospace}\var{e1} [-]{font-family:monospace} \var{f},
+\var{e2})\tabularnewline
+&\tabularnewline
+\var{e} = \var{e1} [{&circ;}]{font-family:monospace} \var{e2}, where [x]{font-family:monospace} occurs in
+\var{e1} & [inverse(]{font-family:monospace}\var{f} [{&circ;}]{font-family:monospace} \var{e2},
+\var{e1})\tabularnewline
+\var{e} = \var{e1} [{&circ;}]{font-family:monospace} \var{e2}, where [x]{font-family:monospace} occurs in
+\var{e2} & [inverse(]{font-family:monospace}\var{f} [{&circ;}]{font-family:monospace} \var{e1},
+\var{e2})\tabularnewline
+\bottomrule
+
+~ End Longtable
+Given [inverse(x]{font-family:monospace}, \var{e}), the rules are applied repeatedly
+until the original value of x in e has been computed. Here is an example
+of computing the inverse of [x = (x + 4) + 5]{font-family:monospace}:
+```
+inverse(x, (x + 4) + 5) =
+       inverse(x - 5, x + 4) =
+          inverse((x - 5) - 4, x) =
+              (x - 5) - 4 
+```
+# Bounds for expressions with nested assignment expressions {  #section-checking-nested-assignment-expressions }
+
+
+C allows assignment expressions to be nested within other expressions.
+This means that the approach of 
+Section [#section-checking-assignment-expressions] has to be extended to walk
+expressions recursively and update the context during the walk.
+
+Given some expression e that has subexpressions e\textsubscript{1}
+\ldots. e\textsubscript{n}, start with the context for e. Compute a
+new context and the bounds expression for e as follows:
+
+
+
+* Traverse e\textsubscript{1} \ldots e\textsubscript{n} in an order
+  that respect the sequence points of [@ISO2011]. For each subexpression, take the
+  context and compute the updated context and the bound expression (if
+  any) for the subexpression.
+
+* If e is an assignment expression, 
+  apply the rules in Section [#section-checking-assignment-expressions] to
+  compute an updated context and a bounds expression for e
+
+* Otherwise, apply the rules in Section [#section-inferring-expression-bounds]
+  to compute an updated bounds
+  expression for e.
+
+# Expression statements {  #section-checking-expression-statements }
+
+
+Expression statements need to be checked for consistency with their
+expected bounds declarations. If an expression statement is within a
+bundled block, the checking is deferred to the end of the bundled block.
+
+To check an expression statement, the analysis of 
+Section [#section-extent-definition] is used
+to determine the context for the expression in the statement (the bounds
+for variables before the statement is evaluated). The rules in 
+Section [#section-checking-nested-assignment-expressions]
+are then used to determine the updated context.
+
+The updated context is then checked against the bounds declarations that
+must be true after the expression statement. For each
+\arrayptr variable \var{x} in scope, the expected bounds is
+computed:
+
+
+
+* If the expression statement has a bounds declaration for \var{x}, the
+  bounds expression in that bounds declaration is used.
+
+* Otherwise, the analysis of Section [#section-extent-definition]
+  is used to determine the
+  expected bounds expression for x.
+
+We will refer to the bounds expression for \var{x} in the updated context
+as the updated bounds expression.  It must imply that the
+expected bounds expression holds. Implication is checked in this section
+using by placing non-modifying expressions into a canonical form and
+checking for syntactic equality. If two expressions have the same
+canonical form, any values that they have at runtime will always be
+identical. Chapter [#chapter-simple-invariants]
+describes more general techniques for checking
+that context bounds imply the expected bounds.
+
+The updated bounds expression implies that the expected bounds
+expression holds if:
+
+
+
+* The expected bounds expression is \boundsnone, or
+
+* The updated bounds expression is \boundsany, or
+
+* The updated bounds expression and the expected bounds expression are
+  equal syntactically after placing the expressions into canonical
+  forms,
+
+* The canonicalized expressions
+  differ syntactically only in their relative alignment, and
+  the context bounds implies the expected relative alignment \var{c}.
+  This is true if:
+
+  
+
+* The context relative alignment is an integer multiple of the
+   expected relative alignment,
+  
+
+* or given a context bounds expression of the form
+   \boundsrel{\var{e1}}{\var{e2}}{\var{d}},
+   [{((\arrayptrchar) \var{x} - (\arrayptrchar) \var{e1}) &perc; \var{c}}]{font-family:monospace}
+   canonicalizes to [0]{font-family:monospace}, as does
+   [{((\arrayptrchar) \var{e2} - (\arrayptrchar) \var{x}) &perc; \var{c}}]{font-family:monospace}.
+  
+
+## Canonicalization of expressions in bounds expressions {  #section-canonicalization }
+
+
+Most readers can skip this section safely and come back to it as
+necessary. This section is for compiler implementers and for programmers
+who want to understand when expressions are regarded as identical by
+canonicalization.
+
+Canonicalization guarantees the following: if two non-modifying
+expressions have the same canonical form and if they produce values when
+evaluated at runtime, the two values will be equal. There are two
+important things to understand about this definition. First, two C
+expressions may have different canonicalized forms and still always
+produce the same value at runtime (in the terminology of logic,
+canonicalization is incomplete). Second, canonicalization does not
+guarantee that an expression will actually produce a value at runtime.
+It may still have a runtime fault. The runtime correctness of bounds
+expressions is implied by transitivity: a bounds expression must be
+implied by another bounds expression, and so on, until a bounds
+expression is implied by an allocation. The allocation must have
+involved an expression that actually produced a value.
+
+This has a surprising consequence: integer arithmetic operations that
+check for overflow can be regarded as following mathematical rules
+during canonicalization. A compiler could not reassociate [{((a
++\textsubscript{ovf} b) +\textsubscript{ovf} c)}]{font-family:monospace} to [{(a
++\textsubscript{ovf} (b +\textsubscript{ovf} c)}]{font-family:monospace} and replace the first
+expression with the second one because it could cause an overflow where
+none occurred before. For canonicalization, though, reassociation is
+fine.
+
+Signed integer operations do not follow certain mathematical identities.
+This is because according to the rules in 
+Section [#section-changes-to-undefined-behavior], they may produce
+a value on overflow, but the properties of the value are not specified.
+Signed addition is not associative: [(a + b) + c]{font-family:monospace} is not
+guaranteed to produce the same result as [a + (b + c)]{font-family:monospace} in the
+presence of overflow. The expression [a + b]{font-family:monospace} may overflow, while
+[b + c]{font-family:monospace} may not overflow or the reverse may occur. In addition,
+for signed integers, it is not guaranteed that [a - b]{font-family:monospace} =
+[a + (-b)]{font-family:monospace} or that [-(-(a))]{font-family:monospace} = [a]{font-family:monospace}.
+
+The canonicalization rules need to disambiguate between signed and
+unsigned operators for integers, as well as operators that check for
+overflow. All integer operators will be subscripted by whether they
+apply to signed or unsigned integers and whether they check overflow 
+using the subscripts [signed]{font-family:monospace}, [unsigned]{font-family:monospace}, and
+[ovf]{font-family:monospace}. For example, the expression [(a + b) + c]{font-family:monospace} involving
+signed integers will be written as [(a
++]{font-family:monospace}_{\textsubscript{signed}}_\/ [b)
++]{font-family:monospace}_{\textsubscript{signed}}_\/ [c]{font-family:monospace}.
+
+The overflow checking operators introduced in
+Section [#section-pointers-as-integers] only include
+operators that can occur in practice. For canonicalization, it is useful
+to have a complete set of operators, including
+[{+\textsubscript{ovf}}]{font-family:monospace} and [{\textsubscript{-ovf}}]{font-family:monospace} that
+take two integers (both signed or unsigned) and produce an integer that
+has the same type as the arguments, as well as unary negation that takes
+a signed or unsigned integer and produces a signed integer.
+
+In the rules for canoncialization, when a subscript on an integer
+operator is omitted, the rule applies to all forms of the operator.
+Sometimes the subscript \var{kind} will be used on operators. Either
+u[nsigned]{font-family:monospace} or [ovf]{font-family:monospace} should be substituted for \var{kind}
+in the rule.
+
+The first step in canonicalization is to convert non-modifying
+expressions to an initial representation:
+
+
+~ Begin Compactenum 
+
+
+* All expressions involving operators are fully parenthesized and
+  unnecessary parenthesis on variables and constants are removed. For
+  example, \var{e1} \var{op1} \var{e2} \var{op2} \var{e3}, is
+  replaced by [((]{font-family:monospace}\var{e1} \var{op1} \var{e2}[)]{font-family:monospace}
+  \var{op2} \var{e3}[)]{font-family:monospace} or [(]{font-family:monospace}\var{e1} \var{op1}
+  [(]{font-family:monospace}\var{e2} \var{op2} \var{e3}[))]{font-family:monospace}, depending on the
+  precedence of \var{op1} and \var{op2}.
+
+* Implicit cast operations are made explicit.
+
+* The pointer dereference [\*]{font-family:monospace} and pointer indirection operators
+  [(->)]{font-family:monospace} are implicitly annotated with their pointer types.
+  This is necessary because converting pointer arithmetic to integer
+  arithmetic will erase the type information needed by these operators.
+
+* Unary plus operations are removed.
+
+* Array references of the form
+  \var{e1}[\[]{font-family:monospace}\var{e2}[\]]{font-family:monospace} are converted to
+  [\*((]{font-family:monospace}\var{e1}[)]{font-family:monospace} [+]{font-family:monospace}
+  [(]{font-family:monospace}\var{e2}[))]{font-family:monospace}
+
+* Pointer arithmetic is expanded to integer-based arithmetic.
+
+* Binary subtraction expressions are canonicalized to use unary minus
+  when possible: \var{e1} [-]{font-family:monospace}_{\textsubscript{kind}}_\/
+  \var{e2} is converted to \var{e1}
+  [+]{font-family:monospace}_{\textsubscript{kind}}_\/
+  [-]{font-family:monospace}_{\textsubscript{kind} e2}_\/.
+
+~ End Compactenum
+For the second step of canonicalization, two sets of binary arithmetic
+operators are defined
+
+
+~ Begin Compactitem 
+
+
+* The set of commutative and associative operators (CA operators).
+  This includes:
+
+  
+
+* The operators +[{\textsubscript{unsigned}}]{font-family:monospace},
+   [{\*\textsubscript{unsigned}}]{font-family:monospace}, [{+\textsubscript{ovf}}]{font-family:monospace},
+   and [{\*\textsubscript{ovf}}]{font-family:monospace}
+  
+
+* The bitwise operators [{&bar;}]{font-family:monospace}, [&amp;]{font-family:monospace}, and
+   [{&circ;}]{font-family:monospace}
+  
+
+* The Boolean operators [{&bar;&bar;}]{font-family:monospace} and
+   [&amp;&amp;]{font-family:monospace}
+  
+
+
+* The set of commutative-only operators (CO):
+  [{+\textsubscript{signed}}]{font-family:monospace} and [{\*\textsubscript{signed}}]{font-family:monospace}.
+
+~ End Compactitem
+The following rules are applied until no further changes occur:
+
+
+~ Begin Compactenum 
+
+
+* Removing pointer casts and identity casts on integral types (casts
+  from a type to itself). Pointer casts do not change the values of
+  pointers.
+
+* Folding constant integral expressions. The following expressions are
+  constant-folded:
+
+  
+~ Begin Compactenum 
+
+
+* Any constant expression that uses only overflow-checking arithmetic
+   operators and that mathematically evaluates to an in-range integer
+   value. The value is the mathematical result.
+  
+
+* Any constant expression involving integers that produces a defined
+   result according to the C language standard or the C implementation
+   rules.
+  
+~ End Compactenum
+
+
+* Applying algebraic identities to simplify expressions
+
+  
+~ Begin Compactenum 
+
+
+* Arithmetic identities
+
+   
+~ Begin Compactenum 
+
+
+* \var{e} [+]{font-family:monospace} [0]{font-family:monospace} = \var{e}, \var{e} [-]{font-family:monospace}
+   [0]{font-family:monospace} = \var{e}, [0]{font-family:monospace} [-]{font-family:monospace} \var{e} =
+   [(-]{font-family:monospace}\var{e}[)]{font-family:monospace}, [0]{font-family:monospace} [\*]{font-family:monospace} \var{e} =
+   [0]{font-family:monospace}, [1]{font-family:monospace} [\*]{font-family:monospace} \var{e} = \var{e}, \var{e} /
+   [1]{font-family:monospace} = \var{e}, \var{e}[/-1]{font-family:monospace} = [-]{font-family:monospace}\var{e},
+   \var{e} [&perc;]{font-family:monospace} [1]{font-family:monospace} = \var{e}
+   
+
+* For a positive constant \var{c}, (\var{e}
+   [\*]{font-family:monospace}_{\textsubscript{kind}}_\/ \var{c}) [&perc;]{font-family:monospace}
+   \var{c} = [0]{font-family:monospace}
+   
+~ End Compactenum
+
+
+* Bitwise identities: \var{e} [&amp;]{font-family:monospace} [0]{font-family:monospace} = [0]{font-family:monospace},
+   \var{e} [{&bar;}]{font-family:monospace} [0]{font-family:monospace} = \var{e}, \var{e}
+   [{&circ;}]{font-family:monospace} [0]{font-family:monospace} = \var{e}, and
+   [{&tilde;(&tilde;}]{font-family:monospace}\var{e}[))]{font-family:monospace} =
+   \var{e}
+  
+
+* Boolean identities: given a non-zero constant c, \var{e}
+   [&amp;&amp;]{font-family:monospace} \var{c} simplifies to \var{e}, \var{e}
+   [{&bar;&bar;}]{font-family:monospace} \var{c} simplifies to [1]{font-family:monospace}, and
+   [!]{font-family:monospace}\var{c} = _0_\/. When \var{c} = [0]{font-family:monospace}, \var{e}
+   [&amp;&amp;]{font-family:monospace} \var{c} simplifies to [0]{font-family:monospace}, \var{e}
+   [{&bar;&bar;}]{font-family:monospace} \var{c} simplifies to \var{e}, and
+   [!]{font-family:monospace}\var{c} = [1]{font-family:monospace}.
+  
+
+* Double negation:
+   [-]{font-family:monospace}_{\textsubscript{kind}}_\/([-]{font-family:monospace}_{\textsubscript{kind}}_\/
+   \var{e}[)]{font-family:monospace} = e.
+  
+
+* Cancelling terms: \var{e} [-]{font-family:monospace}\textsubscript{signed} \var{e}
+   simplifies to [0]{font-family:monospace} and \var{e} [{+\textsubscript{kind}}]{font-family:monospace}
+   ([{-\textsubscript{kind}}]{font-family:monospace} \var{e}) simplifies to [0]{font-family:monospace}.
+   This is applied more generally to a sequence of addition operations
+   of the form [(]{font-family:monospace}\ldots [(]{font-family:monospace}e1
+   [+]{font-family:monospace}\textsubscript{kind} e2[)]{font-family:monospace} \ldots
+   [+]{font-family:monospace}\textsubscript{kind} [-]{font-family:monospace}_{\textsubscript{kind}}_\/
+   e1 \ldots[)]{font-family:monospace}.
+
+   When identities have commutative versions, those are applied as
+   well.
+  
+~ End Compactenum
+
+
+* Applying associativity commutivity, and distributivity rules to put
+  expressions in canonical forms:
+
+~ Begin Compactenum 
+
+
+* For each operator \var{op} in CA, repeatedly rewriting any expression
+  of the from \var{e1} \var{op} [(]{font-family:monospace}\var{e2} \var{op}
+  \var{e3}[)]{font-family:monospace} to [(]{font-family:monospace}\var{e1} \var{op}
+  \var{e2}[)]{font-family:monospace} \var{op} \var{e3} until no further rewrites are
+  possible.
+
+* For each operator \var{op} in CA, for each sequence of operations
+  (\ldots ((\var{e1} \var{op} \var{e2}) \var{op} \var{e3})
+  \ldots \var{op} \var{en}), reordering the operands so that
+  \var{e1} \ldots \var{en} appear in lexicographic order. Constants
+  should appear lower in the lexicographic order than more complex
+  expressions.
+
+* For each operator \var{op} in CO, commuting the operands in \var{e1}
+  \var{op} \var{e2} so that \var{e1} is lower in the lexicographic
+  order.
+
+* Applying the following distributivity rules:
+
+  
+~ Begin Compactenum 
+
+
+* Rewriting [-]{font-family:monospace}_{\textsubscript{kind}}_\/[(]{font-family:monospace}\var{e1}
+   [+]{font-family:monospace}_{\textsubscript{kind}}_\/ \var{e2}[)]{font-family:monospace} to
+   [(-]{font-family:monospace}_{\textsubscript{kind} e1}_\/[)]{font-family:monospace} [+]{font-family:monospace}
+   [(-]{font-family:monospace}_{\textsubscript{kind} e2}_\/[)]{font-family:monospace},
+  
+
+* Rewriting [(]{font-family:monospace}\var{e1} [+]{font-family:monospace}_{\textsubscript{kind}}_\/
+   \var{e2}[)]{font-family:monospace} [\*]{font-family:monospace}_{\textsubscript{kind}}_\/ \var{e3}
+   to [(]{font-family:monospace}\var{e1} [\*]{font-family:monospace}_{\textsubscript{kind}}_\/
+   \var{e3}[)]{font-family:monospace} [+]{font-family:monospace}_{\textsubscript{kind}}_\/
+   [(]{font-family:monospace}\var{e2} [\*]{font-family:monospace}_{\textsubscript{kind}}_\/
+   \var{e3}[)]{font-family:monospace}
+  
+
+* Rewriting [(]{font-family:monospace}e1 &bar; e2[)]{font-family:monospace} &amp; e3 as [(]{font-family:monospace}e1
+   &amp; e3[)]{font-family:monospace} &bar; [(]{font-family:monospace}e2 &amp; e3[)]{font-family:monospace} and
+   rewriting e3 &amp; [(]{font-family:monospace}e1 &bar; e2[)]{font-family:monospace} as [(]{font-family:monospace}e3
+   &amp; e1 &bar; e3 &amp; e2[)]{font-family:monospace}
+  
+
+* Rewriting !(e1 &bar;&bar; e2) as ((!e1) &amp;&amp; (!e2)) and
+   !(e1 &amp;&amp; e2) as ((!e1) &bar;&bar; (!e2))
+  
+
+* Rewriting (e1 &bar;&bar; e2) &amp;&amp; e3 as (e1 &amp;&amp; e3)
+   &bar;&bar; (e2 &amp;&amp; e3) and rewriting e3 &amp;&amp; (e1
+   &bar;&bar; e2) as (e3 &amp;&amp; e1 &bar;&bar; e3 &amp;&amp;
+   e2)
+  
+~ End Compactenum
+
+~ End Compactenum
+
+~ End Compactenum
+The distributivity rules expand the size of expressions, potentially
+increasing size exponentially. Implementations may have a reasonable
+limit on the size of canonicalized expressions. A minimum required limit
+will be determined based on an empirical evaluation of C programs.
+
+## An example of canonicalization {  #section-canonicalization-example }
+
+
+Here is how bounds for the following declaration and statement will be checked:
+```
+array_ptr<int> x;
+x = malloc(sizeof(int)*5) where x : count(5); 
+```
+The function `malloc` is assumed to have the bounds declaration:
+
+```
+array_ptr<void> malloc(size_t num) : byte_count(num); 
+```
+even though in practice it will have a bounds-safe interface that does
+not use a checked pointer type.
+
+First, the implicit casts are made explicit and count is expanded to bounds:
+
+```
+x = (array_ptr<int>) malloc(sizeof(int)*(size_t) 5) where x : bounds(x, x + 5); 
+```
+Next, the bounds for the right-hand expression are computed. The bounds
+declaration for malloc is expanded to:
+```
+array_ptr<void> malloc(size_t num)  
+where return_value : bounds((array_ptr<char>) return_value, 
+                            (array_ptr<char>) return_value + num) 
+```
+The bounds for malloc are used to compute the bounds for the function
+call `malloc(sizeof(int)*(size_t) 5)`. The actual argument
+`sizeof(int)*(size_t) 5` is substituted for `num` in the
+bounds expression for the return value of `malloc`:
+```
+return_value : bounds((array_ptr<char>) return_value, 
+                      (array_ptr<char>) return_value + sizeof(int)*(size_t) 5) 
+```
+Next, `expr_current_value` is substituted for `return_value` :
+```
+expr_current_value : bounds((array_ptr<char>) expr_current_value, 
+                            (array_ptr<char>) expr_current_value + sizeof(int)*(size_t) 5) 
+```
+Then, the bounds for `(array_ptr<int>) malloc(sizeof(int)*(size_t) 5)`
+are computed. The inverse cast `(array_ptr<void> expr_current_value)`
+is substituted for `expr_current_value`:
+
+```
+expr_current_value : bounds((array_ptr<char>) ((array_ptr<void>) expr_current_value), 
+                            (array_ptr<char>) ((array_ptr<void>) expr_current_value)
+                            + sizeof(int)*(size_t) 5)  
+```
+Finally, `x` is substituted for `expr_current_value` :
+
+```
+x : bounds((array_ptr<char>) ((array_ptr<void>) x), 
+           (array_ptr<char>) ((array_ptr<void>) x) + sizeof(int)*(size_t) 5)  
+```
+Now, it has be shown that the computed bounds for `x` imply the expected
+bounds for `x` of `bounds(x, x + 5)`. The bounds expressions are both
+converted to use integer arithmetic:
+
+```
+// computed bounds
+bounds((\arrayptrchar) ((\arrayptrvoid) x),
+       (\arrayptrchar) ((\arrayptrvoid) x) +\textsubscript{ovf} sizeof(int)*\textsubscript{unsigned}(size\_t) 5))
+// expected bounds
+bounds(x, x +\textsubscript{ovf} (5 *\textsubscript{ovf} (signed\_size\_t) sizeof(int))) 
+```
+Next, unnecessary pointer casts are removed:
+```
+// computed bounds
+bounds(x, x +\textsubscript{ovf} (sizeof(int) *\textsubscript{unsigned} (size\_t) 5))
+// expected bounds
+bounds(x, x +\textsubscript{ovf} (5 *\textsubscript{ovf} (signed\_size\_t) sizeof(int))) 
+```
+After that, constant folding is done. If `sizeof(int)` is 4, the result is:
+```
+// computed bounds
+bounds(x, x +\textsubscript{ovf} 20)
+// expected bounds
+bounds(x, x +\textsubscript{ovf} 20) 
+```
+We must also show the expected bounds imply that the 
+`rel_align(int)` requirement is met. This is straightforward for
+a constant-sized array. It involves showing given \bounds{\var{e1}}{\var{e2}}
+that [{((\arrayptrchar) x - (\arrayptrchar) \var{e1}) &perc; 4}]{font-family:monospace} canonicalizes
+to 0, as does [{((\arrayptrchar) \var{e2} - (\arrayptrchar) x) &perc; 4}]{font-family:monospace}.
+
+For the first expression, [((\arrayptrchar) x - (\arrayptrchar) x) &perc; 4]{font-family:monospace}
+simplifies to [0 &perc; 4]{font-family:monospace}, which constant-folds to [0]{font-family:monospace}.
+For the second expression, [((\arrayptrchar) (x + 5) - (\arrayptrchar) x) &perc; 4]{font-family:monospace}
+simplifies to [{((x +\textsubscript{ovf} 20) -\textsubscript{ovf&underscore;diff} x) &perc; 4}]{font-family:monospace}. This
+simplifies to [20 &perc; 4]{font-family:monospace}, which constant-folds to [0]{font-family:monospace}.
+
+If we change the example to make the number of elements variable instead
+of constant, we can see how canonicalization breaks down in the presence
+of integer wraparound. Suppose the number of elements is given by a
+variable `k`. We would have:
+
+```
+// computed bounds
+bounds(x, x +\textsubscript{ovf} (sizeof(int) *\textsubscript{unsigned} (size\_t) k))
+// expected bounds
+bounds(x, x +\textsubscript{ovf} (k *\textsubscript{ovf} (signed\_size\_t) sizeof(int))) 
+```
+After converting pointer arithmetic to integer arithmetic, we have:
+```
+// computed bounds
+bounds(x, x +\textsubscript{ovf} (4 *\textsubscript{unsigned} (size\_t) k))
+// expected bounds
+bounds(x, x +\textsubscript{ovf} (k *\textsubscript{ovf} 4)) 
+```
+Canonicalization of the upper bounds expressions produces:
+```
+// computed bounds
+x +\textsubscript{ovf} (4 *\textsubscript{unsigned} (size\_t) k))
+// expected bounds
+x +\textsubscript{ovf} (4 *\textsubscript{ovf} k) 
+```
+The expressions are not identically syntactically, so bounds expression
+checking fails. The additional side conditions that `k >= 0 && k <= UINTPTR_MAX/4`
+are needed to show that the computed upper bound implies the expected upper bound. More
+general techniques from Chapter [#chapter-simple-invariants] are needed to show that the context
+bounds imply the expected bounds.
+
+## Extending canonicalization to two's complement signed integer arithmetic 
+
+
+In some widely-used C compilers, signed arithmetic implemented
+as two's complement arithmetic is available under a compiler flag. In
+this case, the expected arithmetic properties hold, which enables more
+expressions to be canonicalized to the same form.
+
+# Declarations {  #section-checking-declarations }
+
+
+Declarations also need to be checked for consistency with their bounds
+declarations. If the declaration is within a bundled block, the checking
+is deferred to the end of the bundled block.
+
+C distinguishes between declarations and definitions of variables. A
+declaration declares the type and storage class for a variable. It may
+or may not cause storage to be allocated for the variable. A definition
+is a declaration of a variable that causes storage to be allocated for
+the variable as well. Definitions may have initializers that initialize
+the storage for the variable.
+
+We first describe checking definitions, which is similar to checking
+assignments. For a declaration, we assume that there is an ordered list of
+\arrayptr variables and their optional initializers, and the
+list of bounds declarations in the where clause for the declaration. The
+list is ordered by the order of variable declarations.
+
+First, the current context is computed before the declaration. Then, for
+each variable \var{v} in the list,
+
+
+
+* If \var{v} has an initializer, the current context is updated by
+  traversing the assignment expressions in the initializer using the
+  analysis from Section [#section-checking-nested-assignment-expressions]. 
+  The bounds for each individual assignment
+  expression are recorded as well. Note that if \var{v} is a static
+  variable, the assignment expressions must actually be constant
+  expressions, so the context will not change.
+
+* If \var{v} has an \arrayptr type or an incomplete array
+  type, the context is updated to record the new bounds for \var{v}:
+
+  
+
+* If \var{v} has no initializer, then
+
+   
+
+* If \var{v} is a static variable, then \var{v} will be
+   initialized to 0. The context is updated to map \var{v} to
+   \boundsany.
+   
+
+* If \var{v} is an automatic variable then \var{v} will have an
+   indeterminate value. The context is updated to map v to
+   \boundsnone.
+   
+
+
+* If \var{v} has an initializer, the initializer must have the form
+   \var{e} or [&lcurly;]{font-family:monospace} \var{e} [{&rcurly;}]{font-family:monospace}. In both cases,
+
+   
+
+* If \exprcurrentvalue appears in the bounds for
+   \var{e}, \var{v} is substituted for it.
+   
+
+* The context is updated to map v to the updated bounds.
+   
+
+
+The current context is then checked against the bounds declarations that
+must be true after the declaration using the analysis in 
+Section [#section-checking-expression-statements]
+
+Declarations that are not definitions are not checked, other than to
+verify that all the declarations of a variable in a translation unit
+have the same bounds declaration (or lack of a bounds declarations) for
+the variable.
+
+# Bundled declarations and statements {  #section-checking-bundled }
+
+
+To check bundled declarations and statements, the current context is
+determined before the bundled block. The current context is then updated
+for each expression statement and declaration following the rules for
+updating contexts in Sections [#section-checking-expression-statements] and 
+[#section-checking-declarations]. The analysis of 
+Section [#section-extent-definition]
+is used to determine the expected bounds expression for each variable at
+the end of the bundled block. The current context is checked against the
+bounds declarations that must be true at the end of the block using the
+analysis in Section [#section-checking-expression-statements]
+
+When an expression with \arrayptr type is dereferenced within
+an expression statement in a bundled block, the current context before
+the statement is used to determine the bounds for the expression. This
+may cause an expression to have a different bounds than it normally
+would have based on bounds declarations.
+
+For example, suppose a pointer assignment is introduced into the middle
+of the earlier example. The pointer assignment is highlighted in blue.
+The bounds for `parr` at that point in the program based on the
+current context will be `bounds(parr, parr + size)`.
+
+<!--% The package for highlighting does not work well with the alltt
+% package, so just use a teletype font and handle spacing and line
+% breaking manually.-->
+
+~ Begin Tt 
+int arr\[DEFAULT&underscore;SIZE\];&br;
+array&underscore;ptr<int> parr\ :\ count(len) = arr;&br;
+int plen = DEFAULT&underscore;SIZE;&br;
+&br;
+f(int size) &lcurly;&br;
+[\ \ \ \ ]if (size > DEFAULT&underscore;SIZE) &lcurly;&br;
+[\ \ \ \ \ \ \ \ ]bundle &lcurly;&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ ]parr = malloc(sizeof(int) \* size);&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ ]\sethlcolor{lightblue}\hl{\*parr = 314;}&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ ]plen = size;&br;
+[\ \ \ \ \ \ \ \ ]&rcurly;&br;
+[\ \ \ \ ]&rcurly;&br;
+&rcurly;
+
+~ End Tt
+If the code were slightly rearranged, there would be a compile-time
+error. The assignment to [plen]{font-family:monospace} invalidates the bounds for
+[parr]{font-family:monospace} in the context at the point of the assignment.
+
+
+~ Begin Tt 
+f(int size) &lcurly;&br;
+[\ \ \ \ ]if (size > DEFAULT&underscore;SIZE) &lcurly;&br;
+[\ \ \ \ \ \ \ \ ]bundle &lcurly;&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ ]plen = size;&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ ]\sethlcolor{lightblue}\hl{\*parr = 314;} // error:\ parr has bounds of none.&br;
+[\ \ \ \ \ \ \ \ \ \ \ \ ]parr = malloc(sizeof(int) \* size);&br;
+[\ \ \ \ \ \ \ \ ]&rcurly;&br;
+[\ \ \ \ ]&rcurly;&br;
+&rcurly;
+
+~ End Tt
+A function call within a bundled block require special treatment: the
+bounds declarations for variables with static storage must be valid
+before the call. The called function is assuming that the declared
+bounds are valid. This means that the context before the function call
+must imply that bounds declarations for variables in scope that have
+static storage are valid.
+
+# Function call arguments {  #section-checking-function-call-arguments }
+
+
+Function call arguments also need to be checked for consistency with
+expected bounds declarations. This is similar to checking of expression
+statements with where clauses. For each call f(e\textsubscript{1}
+\ldots e\textsubscript{n}) to a function f(x\textsubscript{1} \ldots
+x\textsubscript{n}) that has bounds declarations for one or more
+parameters,
+
+
+
+* A statement of the form
+
+  x\textsubscript{1} = e\textsubscript{1} [,]{font-family:monospace} x\textsubscript{2} = 
+  e\textsubscript{2} [,]{font-family:monospace} \ldots. x\textsubscript{n} =
+  e\textsubscript{n} where \var{conditions} [;]{font-family:monospace}
+
+  is constructed, where \var{conditions} contains all the bounds
+  declarations on parameters. Parameters are renamed if necessary so
+  that they have different names from variables in scope at the function
+  call.
+
+* The context for the function call is constructed. The statement is
+  checked in that context using the rules in 
+  Section [#section-checking-expression-statements]
+
+* A subtle point is that the order of evaluation for argument
+  expressions in C is not defined (Section [#section-avoiding-undefinedness]
+  discusses order of
+  evaluation issues in depth). A check is done also that the values of
+  argument expressions used in checking the bounds declaration do not
+  depend on the order of evaluation of arguments:
+
+  
+
+* The set of parameters that occur in bounds declarations for
+   parameters is computed.
+  
+
+* Any argument expression corresponding to a parameter in this set
+   cannot read a variable that is assigned to by another argument
+   expression. If one does, the function call is rejected as not
+   checking.
+  
+
+# Return statements 
+
+
+A return statement has the form [return]{font-family:monospace} \var{e}, where \var{e}
+is optional. The bounds for \var{e} are computed. If the special
+variable \exprcurrentvalue occurs in the bounds, the special
+variable \keyword{return&underscore;value} is substituted into the bounds in its
+place. It is then checked that the updated bounds for \var{e} imply the
+return bounds for the function using the rules in 
+Section [#section-checking-expression-statements]
+
+# Other statements 
+
+
+There are a variety of other statements in C. These statements are built
+from zero or more expressions, statements, and declarations:
+
+
+
+* Labeled statements of the form [case]{font-family:monospace}
+  \var{constant-expression} [:]{font-family:monospace} \var{statement},
+  [default :]{font-family:monospace} \var{statement}, and \var{identifier} :
+  \var{statement}.
+
+* Selection statements of the form [if (]{font-family:monospace}
+  \var{expression}[)]{font-family:monospace} \var{statement} [else]{font-family:monospace}
+  \var{statement} and [switch (]{font-family:monospace} \var{expression} [)]{font-family:monospace}
+  \var{statement}.
+
+* Iteration statements such as [while (]{font-family:monospace} \var{expression} )
+  \var{statement} and [for
+  (]{font-family:monospace}\var{declaration\textsubscript{opt}}
+  \var{expression\textsubscript{opt} ; expression\textsubscript{opt}
+  statement}[)]{font-family:monospace}.
+
+* Jump statements of the from [goto]{font-family:monospace} \var{identifier},
+  [continue]{font-family:monospace}, and [break]{font-family:monospace}.
+
+* Compound statements of the form [{&lcurly; ... &rcurly;}]{font-family:monospace} where [...]{font-family:monospace}
+  are zero or more declarations or statements.
+
+The nested statements and declarations can be checked individually.
+
+For the expressions used in the statements, the context is determined
+before the evaluation of the expression. No way is provided for a direct
+expression occurring in a statement to have new bounds declared for any
+bounds in it. This means that the bounds declarations in the context
+will be expected to be true after the evaluation of the expression too.
+
+The rules in Section [#section-checking-nested-assignment-expressions]
+are used to determine the updated context after evaluation of the
+expression. The rules in Section [#section-checking-expression-statements]
+are used to check that the updated
+context implies the expected bounds declarations.
+
+# Avoiding undefined expressions and undefined bounds {  #section-avoiding-undefinedness }
+
+
+The order of evaluation of side-effects in subexpressions of an
+expression is defined in C only in certain circumstances (these are
+described in Section 6.5 and Annex C of [@ISO2011]). Otherwise, the order of
+evaluation of side-effects is undefined. Although nested assignment
+expressions help the brevity of programs, they lead to expressions whose
+meaning or bounds are undefined. To avoid compromising the integrity of
+bounds information, compilers must produce errors when they encounter
+these expressions.
+
+The meaning of an expression is undefined if:
+
+
+
+1. There are multiple assignments to the same variable within an
+  expression where the order of evaluation of the assignments is
+  undefined, or
+
+* There is an assignment to a variable that is also used by the
+  expression, where the order of evaluation of the assignment and the
+  use is undefined.
+
+The following statements illustrate these problems:
+
+```
+y = (x = 5) + (x = 6);
+i = i++ + 1;
+a[i++] = i; 
+```
+In the first case, the value of the right-hand side expression is 11,
+yet at the end of the expression, the value of x could be 5 or 6. In the
+second case, there are two assignments to i and the order is undefined.
+In the third case, it is not clear when i is read vs. when it is
+modified.
+
+Bounds checks can lead to a subtle version of the second problem: an
+expression may have an assignment through a pointer that require a
+bounds check. The bounds for the pointer expression may include a
+variable that is modified in the expression, where the order of
+evaluation of the assignment through the pointer and the variable
+assignment is undefined. This means that the order of evaluation of the
+bounds check and the variable assignment is undefined.
+
+This example illustrates this problem:
+
+```
+w = ...
+where w : bounds(x, x + y);
+int t = *w + (y = tmp); 
+```
+The variable y is an integer variable that is a count of elements. It is
+overwritten during the evaluation of an expression that dereferences w,
+whose bounds include y.
+
+We define these situations to be compile-time errors. Define an
+ambiguous variable in an expression e as:
+
+
+
+* A variable that has multiple assignments to it within e such that the
+  order of evaluation of those assignments is undefined, or
+
+* A variable that has an assignment to it and a use of the variable such
+  that the order of evaluation of the assignment and the use is
+  undefined, or
+
+* A variable that has an assignment to it, where there is some
+  subexpression \*e1 of e where the variable appears in the bounds of e1
+  and the order of evaluation of \*e1 and the assignment to the variable
+  is undefined.
+
+It is a compile-time error for an expression to have an ambiguous
+variable.

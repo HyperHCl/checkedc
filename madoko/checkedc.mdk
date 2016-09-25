@@ -1,0 +1,253 @@
+<!-- LaTeX conversion
+  Drag&Drop further .tex/.bib/.cls/.sty/.bst or image files in the editor window
+  Conversion reference at: http://research.microsoft.com/en-us/um/people/daan/madoko/doc/reference.html#texconv
+-->
+Doc Class   : [11pt]report
+Package     : [left=1in,right=1in,top=1in,bottom=1in]geometry
+Package     : alltt
+Package     : amssymb,amsmath
+Package     : fancyhdr
+Package     : paralist
+Package     : tikz
+Package     : soul
+Package     : upquote
+Package     : microtype
+Package     : longtable,booktabs
+Bib Style   : plainnat
+Bibliography: sources
+Heading Base: 2
+Logo        : True
+TeX Header  :
+    % Latex definitions. If you get errors in math- or PDF generation:
+    % * Move commands that are not used in math under 'Tex Header*' metadata
+    % * Move commands specific to math in a '~ MathDefs' block
+    
+    \pagestyle{fancy}\pagestyle{fancy}\pagestyle{fancy}
+    \fancyhead[RO]{\slshape \rightmark}
+    \fancyhead[LO]{}
+     
+      % drawing support
+      % provide highlighting support
+     
+    \usetikzlibrary{patterns}
+    
+    % use upquote if available, for straight quotes in verbatim environments
+    \IfFileExists{upquote.sty}{ }{}
+    % use microtype if available
+    \IfFileExists{microtype.sty}{%
+     
+    \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+    }{}
+     
+    \hypersetup{unicode=true,
+                pdfborder={0 0 0},
+                breaklinks=true}
+    \urlstyle{same}  % don't use monospace font for urls
+     
+    \IfFileExists{parskip.sty}{%
+     
+    }{% else
+    \setlength{\parindent}{0pt}
+    \setlengt{\parskip}{6pt plus 2pt minus 1pt}
+    }
+    \setlength{\emergencystretch}{3em}  % prevent overfull lines
+    \providecommand{\tightlist}{%
+      \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+    \setcounter{secnumdepth}{3}
+    
+    % Use this command to omit text temporarily for the document.
+    \newcommand{\omitted}[1]{}
+    
+    % Use this command to provide a feedback or comment on the 
+    % text.  The first argument should be the name of the person
+    % providing feedback and the second argument should be the 
+    % text of the feedback.   For example:
+    %  \ feedback{David Tarditi}{Here are some additional examples.}
+    
+    \newcommand{\feedback}[2]{\footnote{Feedback (#1): #2}}
+    
+    %
+    % define colors used for highlighting
+    %
+    \definecolor{lightblue}{rgb}{0.8,0.85,1}
+    \definecolor{lightyellow}{rgb}{1.0,1.0,0.6}
+    \sethlcolor{lightyellow}
+    
+    %
+    % meta variables are italicized.  Use the macro name var
+    % to save on typing.
+    \newcommand{\var}[1]{\texttt{\textit{#1}}}
+    %
+    % macro for font for keywords
+    %
+    \newcommand{\keyword}[1]{\texttt{#1}}
+    \newcommand{\sizeof}[1]{\texttt{sizeof(#1)}}
+    %
+    
+    %
+    % type macros
+    %
+    \newcommand{\void}{\texttt{void}}
+    % array_ptr type macros
+    %
+    \newcommand{\arrayptr}{\texttt{array\_ptr}}
+    \newcommand{\arrayptrinst}[1]{\texttt{array\_ptr<#1>}}
+    \newcommand{\arrayptrT}{\arrayptrinst{\var{T}}}
+    \newcommand{\arrayptrchar}{\arrayptrinst{\texttt{char}}}
+    \newcommand{\arrayptrint}{\arrayptrinst{\texttt{int}}}
+    \newcommand{\arrayptrvoid}{\arrayptrinst{\texttt{void}}}
+    
+    % use the name spanptr because span is already a command
+    % in tex
+    \newcommand{\spanptr}{\texttt{span}}
+    \newcommand{\spanptrinst}[1]{\texttt{span<#1>}}
+    \newcommand{\spanptrT}{\spanptrinst{\var{T}}}
+    \newcommand{\spanptrchar}{\spanptrinst{\texttt{char}}}
+    \newcommand{\spanptrint}{\spanptrinst{\texttt{int}}}
+    \newcommand{\spanptrvoid}{\spanptrinst{\texttt{void}}}
+    
+    \newcommand{\ptr}{\texttt{ptr}}
+    \newcommand{\ptrinst}[1]{\texttt{ptr<#1>}}
+    \newcommand{\ptrT}{\ptrinst{\var{T}}}
+    \newcommand{\ptrchar}{\ptrinst{\texttt{char}}}
+    \newcommand{\ptrint}{\ptrinst{\texttt{int}}}
+    \newcommand{\ptrvoid}{\ptrinst{\texttt{void}}}
+    
+    \newcommand{\uncheckedptrinst}[1]{\texttt{#1 *}}
+    \newcommand{\uncheckedptrT}{\texttt{\var{T} *}}
+    \newcommand{\uncheckedptrvoid}{\uncheckedptrinst{void}}
+    
+    %
+    % bounds expression macros
+    %
+    \newcommand{\relalign}[1]{\texttt{rel\_align(#1)}}
+    \newcommand{\relalignval}[1]{\texttt{rel\_align\_value(#1)}}
+    \newcommand{\bounds}[2]{\texttt{bounds(#1, #2)}}
+    \newcommand{\boundsrel}[3]{\texttt{bounds(#1, #2) \relalign{#3}}}
+    \newcommand{\boundsrelval}[3]{\texttt{bounds(#1\, #2)} \relalignval{#3}}
+    \newcommand{\boundsany}{\texttt{bounds(any)}}
+    \newcommand{\boundsnone}{\texttt{bounds(none)}}
+    \newcommand{\boundscount}[1]{\texttt{count(#1)}}
+    \newcommand{\boundsbytecount}[1]{\texttt{byte\_count(#1)}}
+    
+    %
+    % bounds declaration macros
+    %
+    \newcommand{\boundsdecl}[2]{\texttt{#1}~\texttt{:}~\texttt{#2}}
+    %
+    % computed bounds for expressions
+    %
+    \newcommand{\boundsinfer}[2]{\texttt{#1}~$\vdash$~\texttt{#2}}
+    
+    % expression macros
+    \newcommand{\inbounds}[1]{\texttt{in\_bounds(#1)}}
+    \newcommand{\exprcurrentvalue}{\texttt{expr\_current\_value}}
+
+
+
+
+~ Begin Titlepage 
+{\center
+[ ]&br;
+
+~ Empty { height:'2in' }
+
+~
+
+{\huge Extending C with bounds safety \par}
+<!--%{Version 0.5 (June 14, 2016) \par}-->
+{Version 0.6 - Draft as of &date;\par}
+
+~ Empty { height:'0.5in' }
+
+~
+
+{Checked C Technical Report Number 1 \par}
+
+~ Empty { height:'0.25in' }
+
+~
+
+{Author: David Tarditi, Microsoft\par} 
+
+~ Empty { height:'1in' }
+
+~
+
+_Summary \par_
+
+[INCLUDE=abstract]
+}
+
+~ End Titlepage
+
+~ TexRaw
+\thispagestyle{empty}
+~
+
+[  ]&br;
+
+{ margin-top:"1.0in"}
+
+
+Microsoft is making this Specification available under the Open Web
+Foundation Final Specification Agreement (version OWF 1.0).  The OWF 1.0
+is available at [ <http://www.openwebfoundation.org/legal/the-owf-1-0-agreements/owfa-1-0>]{ color:"blue" }.
+
+This Specification is part of an on-going research project.
+Contributions to this specification
+are made under the Open Web Foundation Contributor License 1.0. 
+This license is available at [ <http://www.openwebfoundation.org/legal/the-owf-1-0-agreements/owf-contributor-license-agreement-1-0---copyright-and-patent>]{ color:"blue" }.
+
+
+&pagebreak;
+<!--% use roman numbers for the table of contents-->
+\setcounter{page}{1}
+\pagenumbering{roman}
+
+
+[TOC]
+<!--% number the body of the document from 1 using arabic-->
+<!--% numerals.-->
+\setcounter{page}{1}
+\pagenumbering{arabic}
+
+
+[INCLUDE=pictures/rel-align-picture1]
+
+[INCLUDE=introduction]
+
+[INCLUDE=core-extensions]
+
+[INCLUDE=variable-bounds]
+
+[INCLUDE=checking-variable-bounds]
+
+[INCLUDE=interoperation]
+
+[INCLUDE=structure-bounds]
+
+[INCLUDE=pointers-to-pointers]
+
+[INCLUDE=simple-invariants]
+
+[INCLUDE=related-work]
+<!--%\ chapter{Experience applying to this to OpenSSL}-->
+<!--%\ label{chapter:eval}-->
+
+[INCLUDE=open-issues]
+
+[INCLUDE=design-alternatives]
+
+\nocite{Jones2009}
+\nocite{Jim2002}
+ 
+
+# References {-}
+[BIB]
+
+
+
+# Appendix { @h1='A' }
+<!--% \ include{fragments}-->
+<!--% \ include{span-compilation}-->
